@@ -74,9 +74,7 @@ const { session } = await createAgentSession({
   cwd: CWD,
   authStorage,
   modelRegistry,
-  sessionManager: SessionManager.continueRecent(CWD).then
-    ? await (async () => SessionManager.continueRecent(CWD))()
-    : SessionManager.continueRecent(CWD),
+  sessionManager: SessionManager.create(CWD),
 });
 
 console.log(`[bridge] Agent session ready (id=${session.sessionId})`);

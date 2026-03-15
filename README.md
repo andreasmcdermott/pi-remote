@@ -46,7 +46,7 @@ PORT=8080 bun run bridge.ts
 ```
 
 The bridge will:
-- Resume the most recent pi session for `AGENT_CWD` (or start a new one)
+- Start a fresh pi session each time (persisted to the sessions directory for `AGENT_CWD`)
 - Print agent output to the terminal as it runs
 - Serve the phone UI at `http://0.0.0.0:<PORT>`
 
