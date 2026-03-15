@@ -121,6 +121,7 @@ commands.
 - [x] Forward `text_delta`, `tool_*`, `agent_start/end` events
 - [x] Accept `prompt`, `steer`, `follow_up`, `abort` commands from phone
 - [x] Terminal logging (streaming text + tool activity + labelled commands)
+- [x] Terminal input loop (type to prompt/steer/follow-up/abort without opening the web UI)
 - [x] Confirm dialog support (safe-bash extension round-trip)
 - [x] Conversation history on connect (renders past messages)
 - [x] Auto-reconnect (phone loses WiFi briefly)

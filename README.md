@@ -56,9 +56,17 @@ The bridge will:
 http://<tailscale-ip>:7700
 ```
 
-## Terminal output
+## Terminal usage
 
-While the agent runs you'll see a compact log in the terminal:
+You can type messages directly in the terminal — no need to open the web UI when you're at your laptop.
+
+| Input | Behaviour |
+|-------|-----------|
+| `some text` + Enter | Prompt (agent idle) or Steer (agent running) |
+| `> some text` + Enter | Follow-up — queued until the agent finishes |
+| `abort` + Enter | Abort the current operation |
+
+While the agent runs you'll see a compact log alongside your input:
 
 ```
 [user] refactor the auth hook
