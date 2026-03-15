@@ -1133,10 +1133,19 @@ textarea#msg-input:focus { border-color: var(--accent); }
 /* ── Mobile: swap to cycle buttons & overflow menu ──────── */
 
 @media (max-width: 600px) {
-  /* Header: hide individual action buttons + session dropdown, show overflow */
+  /* Header: hide individual action buttons + session button, show overflow */
   .header-action-btn { display: none !important; }
-  #session-dropdown { display: none !important; }
+  #session-btn { display: none !important; }
   #overflow-menu { display: block; }
+
+  /* Session panel: fixed so it's visible even though #session-btn is hidden */
+  #session-panel {
+    position: fixed;
+    top: 52px;
+    left: 12px;
+    right: 12px;
+    min-width: unset;
+  }
 
   /* Footer: hide segmented controls, show cycle buttons */
   #mode-segmented { display: none !important; }
