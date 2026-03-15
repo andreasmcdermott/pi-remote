@@ -1,24 +1,25 @@
 /**
- * pi-remote bridge server
+ * pi-remote bridge server — v2 (RPC mode)
  *
- * - Starts a pi agent session using the SDK
- * - Exposes a WebSocket server for the phone UI
- * - Forwards agent events to connected clients
- * - Accepts commands (prompt / steer / follow_up / abort / confirm_response)
- *   from the phone
+ * Spawns `pi --mode rpc` as a child process and multiplexes its JSONL
+ * stdin/stdout stream across multiple WebSocket clients.
+ *
+ * On new connection: fetches get_state + get_messages + get_commands from pi
+ * and sends the responses to the connecting client so it can bootstrap.
+ *
+ * All pi events (no `id` field) are broadcast to every connected client.
+ * Responses (`type: "response"`) are routed to the client that originated
+ * the request, or broadcast for bridge-initiated requests.
+ *
+ * Extension UI: extension_ui_request events are broadcast; first client to
+ * send extension_ui_response wins and it is forwarded to pi stdin.
  */
 
-import {
-  AuthStorage,
-  createAgentSession,
-  ModelRegistry,
-  SessionManager,
-} from "@mariozechner/pi-coding-agent";
-import { randomUUID } from "crypto";
 import { readFileSync } from "fs";
-import { createInterface } from "readline";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { StringDecoder } from "string_decoder";
+import { createInterface } from "readline";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -27,242 +28,220 @@ import { fileURLToPath } from "url";
 const PORT = Number(process.env.PORT ?? 7700);
 const CWD = process.env.AGENT_CWD ?? process.cwd();
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 const PUBLIC_DIR = join(__dirname, "public");
 
 // ---------------------------------------------------------------------------
-// Types
+// Spawn pi --mode rpc
 // ---------------------------------------------------------------------------
 
-type ServerEvent =
-  | { type: "text_delta"; delta: string }
-  | { type: "tool_start"; toolName: string; args: unknown }
-  | { type: "tool_update"; toolName: string; output: string }
-  | { type: "tool_end"; toolName: string; isError: boolean }
-  | { type: "agent_start" }
-  | { type: "agent_end" }
-  | { type: "auto_compaction_start" }
-  | { type: "auto_compaction_end" }
-  | { type: "auto_retry_start"; attempt: number }
-  | { type: "auto_retry_end" }
-  | { type: "confirm_request"; id: string; title: string; message: string; timeout: number }
-  | { type: "history"; messages: HistoryMessage[] }
-  | { type: "error"; message: string };
+console.log(`[bridge] Spawning pi --mode rpc, cwd=${CWD}`);
 
-type ClientCommand =
-  | { type: "prompt"; text: string }
-  | { type: "steer"; text: string }
-  | { type: "follow_up"; text: string }
-  | { type: "abort" }
-  | { type: "confirm_response"; id: string; confirmed: boolean };
+const pi = Bun.spawn(["pi", "--mode", "rpc"], {
+  cwd: CWD,
+  stdin: "pipe",
+  stdout: "pipe",
+  stderr: "inherit",
+  env: { ...process.env },
+});
 
-interface HistoryMessage {
-  role: "user" | "assistant";
-  content: string;
+pi.exited.then((code) => {
+  console.log(`[bridge] pi process exited with code ${code}`);
+  process.exit(code ?? 0);
+});
+
+// ---------------------------------------------------------------------------
+// WebSocket client registry
+// ---------------------------------------------------------------------------
+
+const clients = new Set<any>();
+
+// Pending response routes: requestId -> ws  (null = broadcast to all)
+const pendingResponseRoutes = new Map<string, any | null>();
+
+// Track which extension_ui_request ids have already been answered
+const answeredDialogIds = new Set<string>();
+
+let bridgeReqCounter = 0;
+function nextBridgeId(): string {
+  return `bridge-${++bridgeReqCounter}`;
 }
 
 // ---------------------------------------------------------------------------
-// Agent session setup
+// Communicate with pi
 // ---------------------------------------------------------------------------
 
-const authStorage = AuthStorage.create();
-const modelRegistry = new ModelRegistry(authStorage);
-
-console.log(`[bridge] Starting pi agent session, cwd=${CWD}`);
-
-const { session } = await createAgentSession({
-  cwd: CWD,
-  authStorage,
-  modelRegistry,
-  sessionManager: SessionManager.create(CWD),
-});
-
-console.log(`[bridge] Agent session ready (id=${session.sessionId})`);
+function sendToPi(cmd: object): void {
+  const line = JSON.stringify(cmd) + "\n";
+  pi.stdin.write(line);
+  // No flush needed — Bun flushes automatically for pipe streams on each write
+}
 
 // ---------------------------------------------------------------------------
-// WebSocket client registry & helpers
+// JSONL reader on pi stdout (split on \n only — see RPC docs)
 // ---------------------------------------------------------------------------
 
-const clients = new Set<WebSocket>();
+function attachJsonlReader(
+  stream: ReadableStream<Uint8Array>,
+  onLine: (line: string) => void,
+): void {
+  const decoder = new StringDecoder("utf8");
+  let buffer = "";
 
-// Pending confirm dialogs: id -> resolve function
-const pendingConfirms = new Map<string, (confirmed: boolean) => void>();
+  const reader = stream.getReader();
 
-function broadcast(event: ServerEvent) {
-  const msg = JSON.stringify(event);
+  async function pump() {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        buffer += decoder.end();
+        if (buffer.length > 0) {
+          const line = buffer.endsWith("\r") ? buffer.slice(0, -1) : buffer;
+          if (line) onLine(line);
+        }
+        break;
+      }
+      buffer += decoder.write(value);
+      let idx: number;
+      while ((idx = buffer.indexOf("\n")) !== -1) {
+        let line = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 1);
+        if (line.endsWith("\r")) line = line.slice(0, -1);
+        if (line.trim()) onLine(line);
+      }
+    }
+  }
+
+  pump().catch((err) => console.error("[bridge] pi stdout read error:", err));
+}
+
+// ---------------------------------------------------------------------------
+// Fan-out / route pi output to WebSocket clients
+// ---------------------------------------------------------------------------
+
+function broadcast(msg: string): void {
   for (const ws of clients) {
     try {
       ws.send(msg);
     } catch {
-      // client disconnected; will be cleaned up on close
+      // disconnected; cleaned up in close handler
     }
   }
 }
 
-function sendTo(ws: WebSocket, event: ServerEvent) {
+function sendToWs(ws: any, msg: string): void {
   try {
-    ws.send(JSON.stringify(event));
+    ws.send(msg);
   } catch {
     // ignore
   }
 }
 
-// ---------------------------------------------------------------------------
-// Convert session messages to plain history for new clients
-// ---------------------------------------------------------------------------
+attachJsonlReader(pi.stdout as ReadableStream<Uint8Array>, (line) => {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    console.error("[bridge] failed to parse pi output:", line);
+    return;
+  }
 
-function buildHistory(): HistoryMessage[] {
-  const history: HistoryMessage[] = [];
-  for (const msg of session.messages) {
-    if (msg.role === "user") {
-      const text = msg.content
-        .filter((c: any) => c.type === "text")
-        .map((c: any) => c.text)
-        .join("");
-      if (text) history.push({ role: "user", content: text });
-    } else if (msg.role === "assistant") {
-      const text = msg.content
-        .filter((c: any) => c.type === "text")
-        .map((c: any) => c.text)
-        .join("");
-      if (text) history.push({ role: "assistant", content: text });
+  // Log to terminal for visibility
+  if (parsed.type === "message_update") {
+    const e = parsed.assistantMessageEvent;
+    if (e?.type === "text_delta") process.stdout.write(e.delta);
+    else if (e?.type === "thinking_delta") process.stdout.write(`[think] ${e.delta}`);
+  } else if (
+    parsed.type === "tool_execution_start" ||
+    parsed.type === "agent_start" ||
+    parsed.type === "agent_end"
+  ) {
+    console.log(`[pi] ${JSON.stringify(parsed)}`);
+  }
+
+  // Route: responses with id → specific client or broadcast; events → broadcast
+  if (parsed.type === "response" && parsed.id != null) {
+    const target = pendingResponseRoutes.get(parsed.id);
+    if (target !== undefined) {
+      pendingResponseRoutes.delete(parsed.id);
+      if (target === null) {
+        broadcast(line);
+      } else {
+        sendToWs(target, line);
+      }
+      return;
     }
   }
-  return history;
-}
 
-// ---------------------------------------------------------------------------
-// Subscribe to agent events
-// ---------------------------------------------------------------------------
-
-session.subscribe((event) => {
-  switch (event.type) {
-    case "message_update": {
-      const e = event.assistantMessageEvent;
-      if (e.type === "text_delta") {
-        process.stdout.write(e.delta);
-        broadcast({ type: "text_delta", delta: e.delta });
-      }
-      break;
-    }
-    case "tool_execution_start":
-      process.stdout.write(`\n\n[tool: ${event.toolName}] `);
-      broadcast({ type: "tool_start", toolName: event.toolName, args: event.args });
-      break;
-    case "tool_execution_update":
-      // Don't flood the terminal with tool output — just a dot per update
-      process.stdout.write(".");
-      broadcast({ type: "tool_update", toolName: event.toolName, output: event.output ?? "" });
-      break;
-    case "tool_execution_end":
-      process.stdout.write(event.isError ? " ✗\n" : " ✓\n");
-      broadcast({ type: "tool_end", toolName: event.toolName, isError: event.isError });
-      break;
-    case "agent_start":
-      process.stdout.write("\n");
-      broadcast({ type: "agent_start" });
-      break;
-    case "agent_end":
-      process.stdout.write("\n");
-      broadcast({ type: "agent_end" });
-      break;
-    case "auto_compaction_start":
-      broadcast({ type: "auto_compaction_start" });
-      break;
-    case "auto_compaction_end":
-      broadcast({ type: "auto_compaction_end" });
-      break;
-    case "auto_retry_start":
-      broadcast({ type: "auto_retry_start", attempt: (event as any).attempt ?? 1 });
-      break;
-    case "auto_retry_end":
-      broadcast({ type: "auto_retry_end" });
-      break;
-    case "extension_ui_request": {
-      // safe-bash confirm dialog
-      const req = event as any;
-      if (req.method === "confirm") {
-        const id = randomUUID();
-        const timeout = req.timeout ?? 30000;
-        broadcast({
-          type: "confirm_request",
-          id,
-          title: req.title ?? "Confirm",
-          message: req.message ?? "",
-          timeout,
-        });
-        // Return a promise that resolves when phone responds (or times out)
-        const result = new Promise<boolean>((resolve) => {
-          pendingConfirms.set(id, resolve);
-          setTimeout(() => {
-            if (pendingConfirms.has(id)) {
-              pendingConfirms.delete(id);
-              resolve(false); // default: deny on timeout
-            }
-          }, timeout);
-        });
-        // The extension_ui_request handler expects us to return the result
-        // through the event's respond callback if present
-        if (typeof req.respond === "function") {
-          result.then((confirmed) => req.respond({ confirmed }));
-        }
-      }
-      break;
-    }
-  }
+  // Default: broadcast to all clients
+  broadcast(line);
 });
 
 // ---------------------------------------------------------------------------
-// Command handler (phone → agent)
+// WebSocket message handler (client → pi)
 // ---------------------------------------------------------------------------
 
-async function handleCommand(ws: WebSocket, cmd: ClientCommand) {
+function handleClientMessage(ws: any, raw: string): void {
+  let cmd: any;
   try {
-    switch (cmd.type) {
-      case "prompt":
-        if (session.isStreaming) {
-          sendTo(ws, { type: "error", message: "Agent is busy. Use steer or follow_up." });
-        } else {
-          console.log(`\n[user] ${cmd.text}`);
-          session.prompt(cmd.text).catch((err) => {
-            broadcast({ type: "error", message: String(err) });
-          });
-        }
-        break;
-      case "steer":
-        console.log(`\n[steer] ${cmd.text}`);
-        await session.steer(cmd.text);
-        break;
-      case "follow_up":
-        console.log(`\n[follow_up] ${cmd.text}`);
-        await session.followUp(cmd.text);
-        break;
-      case "abort":
-        await session.abort();
-        break;
-      case "confirm_response": {
-        const resolve = pendingConfirms.get(cmd.id);
-        if (resolve) {
-          pendingConfirms.delete(cmd.id);
-          resolve(cmd.confirmed);
-        }
-        break;
-      }
+    cmd = JSON.parse(raw);
+  } catch {
+    sendToWs(ws, JSON.stringify({ type: "response", command: "parse", success: false, error: "Invalid JSON" }));
+    return;
+  }
+
+  // extension_ui_response: only forward the first response for each dialog id
+  if (cmd.type === "extension_ui_response") {
+    if (answeredDialogIds.has(cmd.id)) return; // already answered
+    answeredDialogIds.add(cmd.id);
+    sendToPi(cmd);
+    return;
+  }
+
+  // Track response route so the reply goes back to this client
+  if (cmd.id != null) {
+    pendingResponseRoutes.set(cmd.id, ws);
+  }
+
+  sendToPi(cmd);
+
+  // Fan-out user-visible commands to all OTHER clients so their UI stays in sync
+  if (cmd.type === "prompt" || cmd.type === "steer" || cmd.type === "follow_up") {
+    for (const other of clients) {
+      if (other !== ws) sendToWs(other, raw);
     }
-  } catch (err) {
-    sendTo(ws, { type: "error", message: String(err) });
   }
 }
 
 // ---------------------------------------------------------------------------
-// Static file helpers
+// Bootstrap a newly connected client
+// ---------------------------------------------------------------------------
+
+function bootstrapClient(ws: any): void {
+  // Send get_state, get_messages, get_commands — route responses to this ws only
+  const stateId = nextBridgeId();
+  const messagesId = nextBridgeId();
+  const commandsId = nextBridgeId();
+
+  pendingResponseRoutes.set(stateId, ws);
+  pendingResponseRoutes.set(messagesId, ws);
+  pendingResponseRoutes.set(commandsId, ws);
+
+  sendToPi({ type: "get_state", id: stateId });
+  sendToPi({ type: "get_messages", id: messagesId });
+  sendToPi({ type: "get_commands", id: commandsId });
+}
+
+// ---------------------------------------------------------------------------
+// Static file server
 // ---------------------------------------------------------------------------
 
 function serveFile(path: string): Response {
   try {
     const content = readFileSync(path);
     const ext = path.split(".").pop() ?? "";
-    const mimeTypes: Record<string, string> = {
+    const mime: Record<string, string> = {
       html: "text/html; charset=utf-8",
       css: "text/css; charset=utf-8",
       js: "application/javascript; charset=utf-8",
@@ -271,7 +250,7 @@ function serveFile(path: string): Response {
       ico: "image/x-icon",
     };
     return new Response(content, {
-      headers: { "Content-Type": mimeTypes[ext] ?? "application/octet-stream" },
+      headers: { "Content-Type": mime[ext] ?? "application/octet-stream" },
     });
   } catch {
     return new Response("Not found", { status: 404 });
@@ -288,55 +267,44 @@ const server = Bun.serve({
   fetch(req, server) {
     const url = new URL(req.url);
 
-    // WebSocket upgrade
     if (req.headers.get("upgrade") === "websocket") {
       const ok = server.upgrade(req);
       if (!ok) return new Response("WebSocket upgrade failed", { status: 400 });
       return undefined as any;
     }
 
-    // Static files
     const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
-    // Prevent path traversal
     const safePath = join(PUBLIC_DIR, pathname.replace(/\.\./g, ""));
     return serveFile(safePath);
   },
 
   websocket: {
     open(ws) {
-      clients.add(ws as unknown as WebSocket);
+      clients.add(ws);
       console.log(`[bridge] Client connected (total=${clients.size})`);
-      // Send current history so phone can catch up
-      sendTo(ws as unknown as WebSocket, { type: "history", messages: buildHistory() });
-      // Tell phone whether agent is currently running
-      if (session.isStreaming) {
-        sendTo(ws as unknown as WebSocket, { type: "agent_start" });
-      }
+      bootstrapClient(ws);
     },
     close(ws) {
-      clients.delete(ws as unknown as WebSocket);
+      clients.delete(ws);
+      // Remove any pending routes for this ws to avoid leaks
+      for (const [id, target] of pendingResponseRoutes) {
+        if (target === ws) pendingResponseRoutes.delete(id);
+      }
       console.log(`[bridge] Client disconnected (total=${clients.size})`);
     },
     message(ws, msg) {
-      let cmd: ClientCommand;
-      try {
-        cmd = JSON.parse(typeof msg === "string" ? msg : msg.toString());
-      } catch {
-        sendTo(ws as unknown as WebSocket, { type: "error", message: "Invalid JSON" });
-        return;
-      }
-      handleCommand(ws as unknown as WebSocket, cmd);
+      handleClientMessage(ws, typeof msg === "string" ? msg : msg.toString());
     },
   },
 });
 
 console.log(`[bridge] Listening on http://0.0.0.0:${PORT}`);
 console.log(`[bridge] Open on your phone: http://<tailscale-ip>:${PORT}`);
-console.log(`[bridge] Type a message and press Enter to prompt. Prefix with '> ' for follow-up. Type 'abort' to stop.`);
+console.log(`[bridge] Terminal: type a prompt, prefix "> " for follow-up, "abort" to stop.`);
 console.log();
 
 // ---------------------------------------------------------------------------
-// Terminal input loop
+// Terminal input loop (optional quick-testing without opening a browser)
 // ---------------------------------------------------------------------------
 
 const rl = createInterface({ input: process.stdin, terminal: false });
@@ -347,20 +315,32 @@ rl.on("line", (line) => {
 
   if (text === "abort") {
     console.log("[abort]");
-    session.abort().catch((err) => console.error("[bridge] abort error:", err));
+    sendToPi({ type: "abort" });
     return;
   }
 
-  // Prefix '> ' → follow-up; otherwise prompt (idle) or steer (running)
   if (text.startsWith("> ")) {
     const msg = text.slice(2).trim();
     console.log(`\n[follow_up] ${msg}`);
-    session.followUp(msg).catch((err) => console.error("[bridge] follow_up error:", err));
-  } else if (session.isStreaming) {
-    console.log(`\n[steer] ${text}`);
-    session.steer(text).catch((err) => console.error("[bridge] steer error:", err));
+    sendToPi({ type: "follow_up", message: msg });
   } else {
-    console.log(`\n[user] ${text}`);
-    session.prompt(text).catch((err) => console.error("[bridge] prompt error:", err));
+    // Use prompt with steer as streaming behavior so it works whether idle or running
+    console.log(`\n[prompt] ${text}`);
+    sendToPi({ type: "prompt", message: text, streamingBehavior: "steer" });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+
+process.on("SIGINT", () => {
+  console.log("\n[bridge] Shutting down…");
+  pi.kill();
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  pi.kill();
+  process.exit(0);
 });

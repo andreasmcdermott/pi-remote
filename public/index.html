@@ -10,31 +10,44 @@
   <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
 </head>
 <body>
+
   <!-- Header / status bar -->
   <header id="header">
-    <span id="status-dot" class="dot idle"></span>
-    <span id="status-text">idle</span>
-    <span id="session-label">pi remote</span>
-    <button id="abort-btn" title="Abort" disabled>■ Stop</button>
+    <div id="header-left">
+      <span id="status-dot" class="dot idle"></span>
+      <span id="status-text">connecting…</span>
+    </div>
+    <div id="header-center">
+      <span id="model-name">pi remote</span>
+    </div>
+    <div id="header-right">
+      <span id="session-stats"></span>
+      <button id="abort-btn" title="Abort" disabled>■ Stop</button>
+    </div>
   </header>
 
   <!-- Conversation -->
   <main id="conversation"></main>
 
-  <!-- Tool activity banner -->
-  <div id="tool-banner" class="hidden">
-    <span id="tool-name"></span>
-    <span id="tool-output" class="tool-output"></span>
+  <!-- Slash command picker (shown above input) -->
+  <div id="cmd-picker" class="hidden">
+    <div id="cmd-list"></div>
   </div>
 
-  <!-- Confirm dialog overlay -->
-  <div id="confirm-overlay" class="hidden">
-    <div id="confirm-box">
-      <h3 id="confirm-title"></h3>
-      <p id="confirm-message"></p>
-      <div class="confirm-buttons">
-        <button id="confirm-deny" class="btn-danger">Deny</button>
-        <button id="confirm-allow" class="btn-primary">Allow</button>
+  <!-- Extension UI dialog overlay -->
+  <div id="dialog-overlay" class="hidden">
+    <div id="dialog-box">
+      <h3 id="dialog-title"></h3>
+      <p id="dialog-message" class="hidden"></p>
+      <!-- select options rendered here -->
+      <div id="dialog-options" class="hidden"></div>
+      <!-- input -->
+      <input id="dialog-input" type="text" class="hidden" autocorrect="off" autocapitalize="off" />
+      <!-- editor -->
+      <textarea id="dialog-editor" class="hidden" rows="6"></textarea>
+      <div id="dialog-buttons">
+        <button id="dialog-cancel" class="btn-secondary">Cancel</button>
+        <button id="dialog-confirm" class="btn-primary hidden">OK</button>
       </div>
     </div>
   </div>
