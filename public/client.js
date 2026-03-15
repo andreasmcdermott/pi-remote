@@ -1511,7 +1511,8 @@ newSessionBtn.addEventListener("click", (e) => {
 });
 
 document.addEventListener("click", (e) => {
-  if (sessionPanelOpen && !sessionPanel.contains(e.target) && e.target !== sessionBtn) {
+  const overflowSessionsBtn = document.getElementById("overflow-sessions");
+  if (sessionPanelOpen && !sessionPanel.contains(e.target) && e.target !== sessionBtn && e.target !== overflowSessionsBtn) {
     closeSessionPanel();
   }
 });
@@ -1620,7 +1621,8 @@ function closeOverflow() {
   overflowPanel.classList.add("hidden");
 }
 
-document.getElementById("overflow-sessions").addEventListener("click", () => {
+document.getElementById("overflow-sessions").addEventListener("click", (e) => {
+  e.stopPropagation();
   closeOverflow();
   openSessionPanel();
 });
