@@ -126,8 +126,9 @@
 
   <script src="client.js"></script>
   <script>
+    // Unregister any previously installed service worker (removed: was causing stale cache issues)
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
     }
   </script>
 </body>
