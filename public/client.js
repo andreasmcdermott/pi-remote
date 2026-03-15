@@ -12,10 +12,17 @@ marked.setOptions({ breaks: true });
 // ─── DOM refs ────────────────────────────────────────────────────────────────
 const statusDot      = document.getElementById("status-dot");
 const statusText     = document.getElementById("status-text");
+const sessionBtn     = document.getElementById("session-btn");
+const sessionPanel   = document.getElementById("session-panel");
+const sessionList    = document.getElementById("session-list");
+const newSessionBtn  = document.getElementById("new-session-btn");
 const modelBtn       = document.getElementById("model-btn");
 const modelPanel     = document.getElementById("model-panel");
 const modelList      = document.getElementById("model-list");
 const sessionStats   = document.getElementById("session-stats");
+const forkBtn        = document.getElementById("fork-btn");
+const exportBtn      = document.getElementById("export-btn");
+const compactBtn     = document.getElementById("compact-btn");
 const abortBtn       = document.getElementById("abort-btn");
 const conversation   = document.getElementById("conversation");
 const cmdPicker      = document.getElementById("cmd-picker");
@@ -30,6 +37,9 @@ const dialogEditor   = document.getElementById("dialog-editor");
 const dialogButtons  = document.getElementById("dialog-buttons");
 const dialogCancel   = document.getElementById("dialog-cancel");
 const dialogConfirm  = document.getElementById("dialog-confirm");
+const imageTray      = document.getElementById("image-tray");
+const attachBtn      = document.getElementById("attach-btn");
+const attachInput    = document.getElementById("attach-input");
 const msgInput       = document.getElementById("msg-input");
 const sendBtn        = document.getElementById("send-btn");
 
@@ -39,6 +49,9 @@ let isConnected      = false;
 let isStreaming      = false;
 let reconnectDelay   = 1000;
 let reqCounter       = 0;
+
+// Attached images waiting to be sent with the next message
+let pendingImages    = []; // [{type:"image", data: base64, mimeType: string, preview: objectURL}]
 
 // Slash commands list (populated from get_commands response)
 let availableCommands = [];
@@ -66,6 +79,26 @@ let activeDialog = null; // { id, method, resolve }
 
 // Streaming render state
 let streamingTurn = null; // { textEl, thinkingEl, thinkingRaw, textRaw, toolCards: Map<toolCallId, el> }
+
+// ─── Unread / finish indicator ────────────────────────────────────────────────
+
+const ORIGINAL_TITLE = "pi remote";
+let unreadFinished = false;
+
+function markFinished() {
+  if (!document.hidden) return; // user is watching — no badge needed
+  unreadFinished = true;
+  document.title = "✓ pi remote";
+}
+
+function clearUnread() {
+  unreadFinished = false;
+  document.title = ORIGINAL_TITLE;
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && unreadFinished) clearUnread();
+});
 
 // ─── WebSocket ───────────────────────────────────────────────────────────────
 
@@ -154,14 +187,19 @@ function handleMessage(msg) {
       isStreaming = true;
       setAgentStatus("running");
       startStreamingTurn();
+      if (navigator.vibrate) navigator.vibrate(30);
+      startStatsPolling();
       break;
 
     case "agent_end":
       isStreaming = false;
       setAgentStatus("idle");
       finaliseStreamingTurn();
+      stopStatsPolling();
       // Refresh stats after agent finishes
       requestStats();
+      if (navigator.vibrate) navigator.vibrate([20, 60, 20]);
+      markFinished();
       break;
 
     case "message_update":
@@ -250,6 +288,42 @@ function handleResponse(msg) {
 
     case "get_session_stats":
       applyStats(msg.data);
+      break;
+
+    case "list_sessions":
+      renderSessionList(msg.data?.sessions ?? []);
+      break;
+
+    case "get_fork_messages":
+      renderForkList(msg.data?.messages ?? []);
+      break;
+
+    case "fork":
+      if (!msg.data?.cancelled) {
+        appendSystemNote(`✓ Forked — new branch from that message`);
+        conversation.innerHTML = "";
+        streamingTurn = null;
+        send({ type: "get_messages", id: nextId() });
+      }
+      break;
+
+    case "switch_session":
+      if (!msg.data?.cancelled) {
+        appendSystemNote("✓ Session loaded");
+        conversation.innerHTML = "";
+        streamingTurn = null;
+        send({ type: "get_messages", id: nextId() });
+        requestStats();
+      }
+      break;
+
+    case "new_session":
+      if (!msg.data?.cancelled) {
+        appendSystemNote("✓ New session started");
+        conversation.innerHTML = "";
+        streamingTurn = null;
+        requestStats();
+      }
       break;
   }
 }
@@ -387,6 +461,43 @@ function requestStats() {
   send({ type: "get_session_stats", id: nextId() });
 }
 
+let statsPollingInterval = null;
+
+function startStatsPolling() {
+  if (statsPollingInterval) return;
+  statsPollingInterval = setInterval(() => {
+    if (isStreaming) requestStats();
+  }, 2500);
+}
+
+function stopStatsPolling() {
+  if (statsPollingInterval) {
+    clearInterval(statsPollingInterval);
+    statsPollingInterval = null;
+  }
+}
+
+// ─── Code block copy buttons ─────────────────────────────────────────────────
+
+function addCopyButtons(containerEl) {
+  containerEl.querySelectorAll("pre").forEach((pre) => {
+    if (pre.querySelector(".copy-btn")) return; // already added
+    const btn = document.createElement("button");
+    btn.className = "copy-btn";
+    btn.textContent = "Copy";
+    btn.addEventListener("click", () => {
+      const code = pre.querySelector("code")?.textContent ?? pre.textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = "Copied!";
+        btn.classList.add("copied");
+        setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1500);
+      }).catch(() => {});
+    });
+    pre.style.position = "relative";
+    pre.appendChild(btn);
+  });
+}
+
 // ─── History rendering ───────────────────────────────────────────────────────
 
 function renderHistory(messages) {
@@ -414,6 +525,7 @@ function renderHistory(messages) {
             const textEl = document.createElement("div");
             textEl.className = "bubble assistant";
             textEl.innerHTML = marked.parse(block.text);
+            addCopyButtons(textEl);
             turnEl.appendChild(textEl);
             hasContent = true;
           } else if (block.type === "thinking" && block.thinking) {
@@ -516,6 +628,7 @@ function finaliseStreamingTurn() {
   if (t.textEl && t.textRaw) {
     t.textEl.innerHTML = marked.parse(t.textRaw);
     t.textEl.classList.remove("streaming");
+    addCopyButtons(t.textEl);
   }
 
   // Finalise thinking
@@ -637,7 +750,7 @@ function createTurnElement() {
   return el;
 }
 
-function appendUserBubble(text) {
+function appendUserBubble(text, images) {
   const row = document.createElement("div");
   row.className = "bubble-row user";
   const label = document.createElement("div");
@@ -645,7 +758,23 @@ function appendUserBubble(text) {
   label.textContent = "You";
   const b = document.createElement("div");
   b.className = "bubble user";
-  b.textContent = text;
+  if (images?.length) {
+    const tray = document.createElement("div");
+    tray.className = "bubble-image-tray";
+    images.forEach(img => {
+      const el = document.createElement("img");
+      el.src = `data:${img.mimeType};base64,${img.data}`;
+      el.alt = "attachment";
+      el.className = "bubble-image";
+      tray.appendChild(el);
+    });
+    b.appendChild(tray);
+  }
+  if (text) {
+    const textNode = document.createElement("span");
+    textNode.textContent = text;
+    b.appendChild(textNode);
+  }
   row.appendChild(label);
   row.appendChild(b);
   conversation.appendChild(row);
@@ -1021,18 +1150,32 @@ function sendMessage() {
   hideCmdPicker();
 
   const mode = getMode();
+  const images = pendingImages.length > 0
+    ? pendingImages.map(({ type, data, mimeType }) => ({ type, data, mimeType }))
+    : undefined;
 
   if (mode === "prompt") {
-    appendUserBubble(text);
+    appendUserBubble(text, images);
     // Use streamingBehavior so it works whether idle or running
-    send({ type: "prompt", message: text, streamingBehavior: "steer" });
+    const cmd = { type: "prompt", message: text, streamingBehavior: "steer" };
+    if (images) cmd.images = images;
+    send(cmd);
   } else if (mode === "steer") {
     appendSystemNote(`[steer] ${text}`);
-    send({ type: "steer", message: text });
+    const cmd = { type: "steer", message: text };
+    if (images) cmd.images = images;
+    send(cmd);
   } else if (mode === "follow_up") {
     appendSystemNote(`[follow-up] ${text}`);
-    send({ type: "follow_up", message: text });
+    const cmd = { type: "follow_up", message: text };
+    if (images) cmd.images = images;
+    send(cmd);
   }
+
+  // Clear pending images
+  pendingImages.forEach(img => URL.revokeObjectURL(img.preview));
+  pendingImages = [];
+  renderImageTray();
 
   msgInput.value = "";
   msgInput.style.height = "auto";
@@ -1040,6 +1183,46 @@ function sendMessage() {
 }
 
 abortBtn.addEventListener("click", () => send({ type: "abort" }));
+
+forkBtn.addEventListener("click", openForkPanel);
+
+exportBtn.addEventListener("click", () => {
+  // Grab the rendered conversation HTML and wrap it in a minimal standalone page
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>pi remote — exported conversation</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d0d0d; color: #e8e8e8; margin: 0; padding: 20px; }
+  .turn { margin-bottom: 16px; }
+  .bubble { max-width: 80%; padding: 10px 14px; border-radius: 12px; margin-bottom: 6px; word-break: break-word; }
+  .bubble.user { background: #23204a; border: 1px solid #7c6af7; color: #d6d0ff; margin-left: auto; }
+  .bubble.assistant { background: #1a1a1a; border: 1px solid #2e2e2e; }
+  .bubble.system-note { color: #888; font-style: italic; font-size: 12px; text-align: center; }
+  .bubble-row.user { display: flex; flex-direction: column; align-items: flex-end; }
+  pre { background: #0a0a0a; border: 1px solid #2e2e2e; border-radius: 8px; padding: 12px; overflow-x: auto; }
+  code { font-family: monospace; font-size: 12px; }
+  .copy-btn { display: none; }
+</style>
+</head>
+<body>
+${conversation.innerHTML}
+</body>
+</html>`;
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pi-conversation-${new Date().toISOString().slice(0,19).replace(/:/g,"-")}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+compactBtn.addEventListener("click", () => {
+  appendSystemNote("⟳ Requesting compaction…");
+  sendWithId({ type: "compact" });
+});
 
 sendBtn.addEventListener("click", sendMessage);
 
@@ -1148,6 +1331,220 @@ document.addEventListener("keydown", (e) => {
 });
 
 
+
+// ─── Image attachment ─────────────────────────────────────────────────────────
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // result is "data:image/png;base64,XXXX" — strip the prefix
+      const result = reader.result;
+      const b64 = result.split(",")[1];
+      resolve({ type: "image", data: b64, mimeType: file.type || "image/png" });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addImages(files) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) continue;
+    try {
+      const img = await readFileAsBase64(file);
+      img.preview = URL.createObjectURL(file);
+      pendingImages.push(img);
+    } catch (e) {
+      appendErrorBubble(`Failed to read image: ${e.message}`);
+    }
+  }
+  renderImageTray();
+}
+
+function renderImageTray() {
+  imageTray.innerHTML = "";
+  if (pendingImages.length === 0) {
+    imageTray.classList.add("hidden");
+    return;
+  }
+  imageTray.classList.remove("hidden");
+  pendingImages.forEach((img, idx) => {
+    const thumb = document.createElement("div");
+    thumb.className = "image-thumb";
+    const im = document.createElement("img");
+    im.src = img.preview;
+    im.alt = "attachment";
+    const rm = document.createElement("button");
+    rm.className = "image-remove";
+    rm.textContent = "✕";
+    rm.addEventListener("click", () => {
+      URL.revokeObjectURL(img.preview);
+      pendingImages.splice(idx, 1);
+      renderImageTray();
+    });
+    thumb.appendChild(im);
+    thumb.appendChild(rm);
+    imageTray.appendChild(thumb);
+  });
+}
+
+attachBtn.addEventListener("click", () => attachInput.click());
+attachInput.addEventListener("change", () => {
+  if (attachInput.files?.length) {
+    addImages([...attachInput.files]);
+    attachInput.value = "";
+  }
+});
+
+// Paste support (clipboard images)
+document.addEventListener("paste", async (e) => {
+  const items = [...(e.clipboardData?.items ?? [])];
+  const imageItems = items.filter(it => it.kind === "file" && it.type.startsWith("image/"));
+  if (imageItems.length === 0) return;
+  e.preventDefault();
+  const files = imageItems.map(it => it.getAsFile()).filter(Boolean);
+  await addImages(files);
+  msgInput.focus();
+});
+
+// ─── Conversation forking ─────────────────────────────────────────────────────
+
+let forkMessages = []; // [{entryId, text}]
+let forkPanelOpen = false;
+const forkOverlay = (() => {
+  const el = document.createElement("div");
+  el.id = "fork-overlay";
+  el.className = "hidden";
+  el.innerHTML = `
+    <div id="fork-box">
+      <div id="fork-header">
+        <span>Fork from message</span>
+        <button id="fork-close" class="btn-small">✕</button>
+      </div>
+      <div id="fork-list"></div>
+    </div>`;
+  document.body.appendChild(el);
+  return el;
+})();
+const forkList = document.getElementById("fork-list");
+const forkClose = document.getElementById("fork-close");
+
+forkClose.addEventListener("click", closeForkPanel);
+forkOverlay.addEventListener("click", (e) => { if (e.target === forkOverlay) closeForkPanel(); });
+
+function openForkPanel() {
+  forkOverlay.classList.remove("hidden");
+  forkPanelOpen = true;
+  // Fetch fork messages
+  const id = nextId();
+  send({ type: "get_fork_messages", id });
+}
+
+function closeForkPanel() {
+  forkOverlay.classList.add("hidden");
+  forkPanelOpen = false;
+}
+
+function renderForkList(messages) {
+  forkList.innerHTML = "";
+  if (!messages.length) {
+    forkList.innerHTML = '<div class="session-empty">No messages to fork from</div>';
+    return;
+  }
+  messages.forEach((m) => {
+    const item = document.createElement("button");
+    item.className = "fork-item";
+    item.textContent = m.text.length > 120 ? m.text.slice(0, 117) + "…" : m.text;
+    item.addEventListener("click", () => {
+      closeForkPanel();
+      sendWithId({ type: "fork", entryId: m.entryId });
+      appendSystemNote(`⑂ Forking from: "${m.text.slice(0, 60)}${m.text.length > 60 ? "…" : ""}"`);
+    });
+    forkList.appendChild(item);
+  });
+}
+
+// ─── Session switching ────────────────────────────────────────────────────────
+
+let sessionPanelOpen = false;
+
+function openSessionPanel() {
+  sessionPanel.classList.remove("hidden");
+  sessionPanelOpen = true;
+  // Fetch sessions list
+  const id = nextId();
+  pendingSessionListId = id;
+  send({ type: "list_sessions", id });
+}
+
+function closeSessionPanel() {
+  sessionPanel.classList.add("hidden");
+  sessionPanelOpen = false;
+}
+
+let pendingSessionListId = null;
+
+sessionBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  sessionPanelOpen ? closeSessionPanel() : openSessionPanel();
+});
+
+newSessionBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeSessionPanel();
+  sendWithId({ type: "new_session" });
+  appendSystemNote("↻ Starting new session…");
+});
+
+document.addEventListener("click", (e) => {
+  if (sessionPanelOpen && !sessionPanel.contains(e.target) && e.target !== sessionBtn) {
+    closeSessionPanel();
+  }
+});
+
+function renderSessionList(sessions) {
+  sessionList.innerHTML = "";
+  if (sessions.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "session-empty";
+    empty.textContent = "No saved sessions";
+    sessionList.appendChild(empty);
+    return;
+  }
+  sessions.forEach((s) => {
+    const item = document.createElement("button");
+    item.className = "session-item";
+    const ts = new Date(s.mtime).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const name = document.createElement("span");
+    name.className = "session-item-name";
+    name.textContent = s.name.slice(-36); // show uuid-like portion
+    const time = document.createElement("span");
+    time.className = "session-item-time";
+    time.textContent = ts;
+    item.appendChild(name);
+    item.appendChild(time);
+    item.addEventListener("click", () => {
+      closeSessionPanel();
+      sendWithId({ type: "switch_session", sessionPath: s.path });
+      appendSystemNote(`↻ Switching session…`);
+    });
+    sessionList.appendChild(item);
+  });
+}
+
+
+
+// ─── Thinking level control ───────────────────────────────────────────────────
+
+document.querySelectorAll(".thinking-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".thinking-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    const level = btn.dataset.level;
+    sendWithId({ type: "set_thinking_level", level });
+  });
+});
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 

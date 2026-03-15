@@ -15,8 +15,9 @@
  * send extension_ui_response wins and it is forwarded to pi stdin.
  */
 
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";
 import { join, dirname } from "path";
+import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { StringDecoder } from "string_decoder";
 import { createInterface } from "readline";
@@ -235,12 +236,38 @@ attachJsonlReader(pi.stdout as ReadableStream<Uint8Array>, (line) => {
 // WebSocket message handler (client → pi)
 // ---------------------------------------------------------------------------
 
+function listSessionFiles(): Array<{ path: string; name: string; mtime: number }> {
+  try {
+    const cwdSlug = "--" + CWD.replace(/\//g, "-").replace(/^-/, "") + "--";
+    const sessionsDir = join(homedir(), ".pi", "agent", "sessions", cwdSlug);
+    const files = readdirSync(sessionsDir);
+    return files
+      .filter((f) => f.endsWith(".jsonl"))
+      .map((f) => {
+        const fullPath = join(sessionsDir, f);
+        let mtime = 0;
+        try { mtime = statSync(fullPath).mtimeMs; } catch {}
+        return { path: fullPath, name: f.replace(".jsonl", ""), mtime };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+  } catch {
+    return [];
+  }
+}
+
 function handleClientMessage(ws: any, raw: string): void {
   let cmd: any;
   try {
     cmd = JSON.parse(raw);
   } catch {
     sendToWs(ws, JSON.stringify({ type: "response", command: "parse", success: false, error: "Invalid JSON" }));
+    return;
+  }
+
+  // list_sessions: handled bridge-side (filesystem scan)
+  if (cmd.type === "list_sessions") {
+    const sessions = listSessionFiles();
+    sendToWs(ws, JSON.stringify({ type: "response", command: "list_sessions", success: true, id: cmd.id, data: { sessions } }));
     return;
   }
 

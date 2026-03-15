@@ -6,6 +6,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>pi remote</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
 </head>
@@ -16,6 +18,16 @@
     <div id="header-left">
       <span id="status-dot" class="dot idle"></span>
       <span id="status-text">connecting…</span>
+      <div id="session-dropdown">
+        <button id="session-btn" title="Sessions">⎇</button>
+        <div id="session-panel" class="hidden">
+          <div id="session-panel-header">
+            <span>Sessions</span>
+            <button id="new-session-btn" class="btn-small">+ New</button>
+          </div>
+          <div id="session-list"></div>
+        </div>
+      </div>
     </div>
     <div id="header-center">
       <div id="model-dropdown">
@@ -27,6 +39,9 @@
     </div>
     <div id="header-right">
       <span id="session-stats"></span>
+      <button id="fork-btn" title="Fork conversation">⑂ Fork</button>
+      <button id="export-btn" title="Export conversation">↓ Export</button>
+      <button id="compact-btn" title="Compact context">⟳ Compact</button>
       <button id="abort-btn" title="Abort" disabled>■ Stop</button>
     </div>
   </header>
@@ -59,10 +74,13 @@
 
   <!-- Input area -->
   <footer id="input-area">
+    <div id="image-tray" class="hidden"></div>
     <div id="input-row">
+      <button id="attach-btn" title="Attach image">📎</button>
+      <input id="attach-input" type="file" accept="image/*" multiple style="display:none" />
       <textarea
         id="msg-input"
-        placeholder="Send a message…"
+        placeholder="Send a message… (paste screenshots here)"
         rows="1"
         autocorrect="off"
         autocapitalize="sentences"
@@ -80,9 +98,20 @@
       <label class="mode-opt">
         <input type="radio" name="send-mode" value="follow_up" /> Follow-up
       </label>
+      <div id="thinking-control" title="Thinking level">
+        <span class="thinking-label">🧠</span>
+        <button class="thinking-btn active" data-level="none" title="No thinking">Off</button>
+        <button class="thinking-btn" data-level="low" title="Low thinking">Low</button>
+        <button class="thinking-btn" data-level="high" title="High thinking">High</button>
+      </div>
     </div>
   </footer>
 
   <script src="client.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  </script>
 </body>
 </html>
