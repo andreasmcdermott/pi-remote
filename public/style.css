@@ -50,7 +50,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: calc(var(--safe-top) + 10px) 12px 10px;
+  padding: max(var(--safe-top), 10px) 12px 10px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -586,7 +586,7 @@ body {
   flex-shrink: 0;
   background: var(--surface);
   border-top: 1px solid var(--border);
-  padding: 10px 12px calc(var(--safe-bottom) + 10px);
+  padding: 10px 12px max(var(--safe-bottom), 10px);
   display: flex;
   flex-direction: column;
   gap: 8px;
