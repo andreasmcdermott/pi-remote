@@ -104,6 +104,28 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Wrapper so we can stack the sender label above the bubble */
+.bubble-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bubble-row.user  { align-items: flex-end; }
+.bubble-row.assistant { align-items: flex-start; }
+
+.sender-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0 4px;
+  color: var(--text-dim);
+}
+
+.bubble-row.user     .sender-label { color: var(--accent-hover); }
+.bubble-row.assistant .sender-label { color: var(--green); }
+
 .bubble {
   max-width: 88%;
   padding: 10px 14px;
@@ -116,14 +138,22 @@ body {
 
 .bubble.user {
   align-self: flex-end;
-  background: var(--user-bg);
-  border: 1px solid #3c3680;
+  background: #23204a;
+  border: 1px solid var(--accent);
+  color: #d6d0ff;
 }
 
 .bubble.assistant {
   align-self: flex-start;
   background: var(--surface);
   border: 1px solid var(--border);
+  color: var(--text);
+}
+
+/* Desktop: slightly wider bubbles and more generous spacing */
+@media (min-width: 600px) {
+  .bubble { max-width: 78%; font-size: 14.5px; }
+  #conversation { gap: 16px; padding: 20px 20px; }
 }
 
 /* streaming cursor */

@@ -143,12 +143,25 @@ function renderHistory(messages) {
     if (msg.role === "user") {
       appendUserBubble(msg.content);
     } else {
+      const row = createBubbleRow("assistant");
       const b = createBubble("assistant");
       b.innerHTML = marked.parse(msg.content);
-      conversation.appendChild(b);
+      row.appendChild(b);
+      conversation.appendChild(row);
     }
   }
   scrollToBottom();
+}
+
+/** Wraps a bubble in a .bubble-row with a sender label. */
+function createBubbleRow(role) {
+  const row = document.createElement("div");
+  row.className = `bubble-row ${role}`;
+  const label = document.createElement("div");
+  label.className = "sender-label";
+  label.textContent = role === "user" ? "You" : "pi";
+  row.appendChild(label);
+  return row;
 }
 
 function createBubble(cls) {
@@ -158,16 +171,20 @@ function createBubble(cls) {
 }
 
 function appendUserBubble(text) {
+  const row = createBubbleRow("user");
   const b = createBubble("user");
   b.textContent = text;
-  conversation.appendChild(b);
+  row.appendChild(b);
+  conversation.appendChild(row);
   scrollToBottom();
 }
 
 function appendAssistantDelta(delta) {
   if (!currentAssistantBubble) {
+    const row = createBubbleRow("assistant");
     currentAssistantBubble = createBubble("assistant streaming");
-    conversation.appendChild(currentAssistantBubble);
+    row.appendChild(currentAssistantBubble);
+    conversation.appendChild(row);
     currentAssistantRaw = "";
   }
   currentAssistantRaw += delta;
