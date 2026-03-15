@@ -46,6 +46,7 @@ interface ModelRef {
 interface Prefs {
   lastModel?: { provider: string; modelId: string };
   recentModels?: ModelRef[];
+  lastThinkingLevel?: string;
 }
 
 const PREFS_PATH = join(__dirname, "prefs.json");
@@ -290,6 +291,11 @@ function handleClientMessage(ws: any, raw: string): void {
     savePrefs(prefs);
   }
 
+  if (cmd.type === "set_thinking_level" && cmd.level) {
+    prefs.lastThinkingLevel = cmd.level;
+    savePrefs(prefs);
+  }
+
   sendToPi(cmd);
 
   // Fan-out user-visible commands to all OTHER clients so their UI stays in sync
@@ -332,6 +338,14 @@ function bootstrapClient(ws: any): void {
     const restoreId = nextBridgeId();
     pendingResponseRoutes.set(restoreId, null); // broadcast to all
     sendToPi({ type: "set_model", id: restoreId, ...prefs.lastModel });
+  }
+
+  // Always restore thinking level (pi resets it on each startup)
+  if (prefs.lastThinkingLevel && prefs.lastThinkingLevel !== "none") {
+    console.log(`[bridge] Restoring thinking level: ${prefs.lastThinkingLevel}`);
+    const thinkId = nextBridgeId();
+    pendingResponseRoutes.set(thinkId, null);
+    sendToPi({ type: "set_thinking_level", id: thinkId, level: prefs.lastThinkingLevel });
   }
 }
 
