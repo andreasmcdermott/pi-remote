@@ -1531,7 +1531,7 @@ function renderSessionList(sessions) {
     const ts = new Date(s.mtime).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     const name = document.createElement("span");
     name.className = "session-item-name";
-    name.textContent = s.name.slice(-36); // show uuid-like portion
+    name.textContent = s.name;
     const time = document.createElement("span");
     time.className = "session-item-time";
     time.textContent = ts;

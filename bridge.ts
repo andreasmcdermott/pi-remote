@@ -237,6 +237,25 @@ attachJsonlReader(pi.stdout as ReadableStream<Uint8Array>, (line) => {
 // WebSocket message handler (client → pi)
 // ---------------------------------------------------------------------------
 
+function firstUserMessage(filePath: string): string {
+  try {
+    const content = readFileSync(filePath, "utf8");
+    for (const line of content.split("\n")) {
+      if (!line.trim()) continue;
+      const entry = JSON.parse(line);
+      if (entry.type === "message" && entry.message?.role === "user") {
+        const parts = entry.message.content;
+        const text = Array.isArray(parts)
+          ? parts.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ")
+          : String(parts ?? "");
+        const trimmed = text.trim().replace(/\s+/g, " ");
+        return trimmed.length > 80 ? trimmed.slice(0, 77) + "…" : trimmed;
+      }
+    }
+  } catch {}
+  return "";
+}
+
 function listSessionFiles(): Array<{ path: string; name: string; mtime: number }> {
   try {
     const cwdSlug = "--" + CWD.replace(/\//g, "-").replace(/^-/, "") + "--";
@@ -248,7 +267,8 @@ function listSessionFiles(): Array<{ path: string; name: string; mtime: number }
         const fullPath = join(sessionsDir, f);
         let mtime = 0;
         try { mtime = statSync(fullPath).mtimeMs; } catch {}
-        return { path: fullPath, name: f.replace(".jsonl", ""), mtime };
+        const preview = firstUserMessage(fullPath);
+        return { path: fullPath, name: preview || f.replace(".jsonl", ""), mtime };
       })
       .sort((a, b) => b.mtime - a.mtime);
   } catch {
