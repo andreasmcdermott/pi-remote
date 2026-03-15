@@ -189,33 +189,7 @@ body {
   white-space: nowrap;
 }
 
-#export-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 4px 9px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-#export-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
-#export-btn:active { background: rgba(255,255,255,0.08); }
-
-#compact-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 4px 9px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-#compact-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
-#compact-btn:active { background: rgba(255,255,255,0.08); }
+/* #export-btn and #compact-btn now use .header-action-btn */
 
 #abort-btn {
   background: none;
@@ -640,19 +614,57 @@ textarea#msg-input:focus { border-color: var(--accent); }
 
 #mode-row {
   display: flex;
-  gap: 16px;
+  align-items: center;
+  gap: 10px;
   padding: 0 2px;
 }
 
-.mode-opt {
-  font-size: 13px;
-  color: var(--text-dim);
-  cursor: pointer;
+/* ── Mode segmented buttons (desktop) ───────────────────── */
+
+#mode-segmented {
   display: flex;
-  align-items: center;
-  gap: 5px;
+  gap: 3px;
 }
-.mode-opt input[type=radio] { accent-color: var(--accent); }
+
+.mode-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.mode-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.mode-btn:not(.active):hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.06);
+}
+
+/* ── Mode cycle button (mobile only) ────────────────────── */
+
+#mode-cycle {
+  display: none;
+  background: var(--surface2);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  cursor: pointer;
+  min-width: 70px;
+  text-align: center;
+}
+
+#mode-cycle:active { background: rgba(124,106,247,0.15); }
 
 /* ── Buttons ─────────────────────────────────────────── */
 
@@ -821,8 +833,9 @@ textarea#msg-input:focus { border-color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text-dim);
-  font-size: 18px;
-  padding: 8px 10px;
+  font-size: 16px;
+  line-height: 1.5;
+  padding: 10px 10px;
   cursor: pointer;
   flex-shrink: 0;
   -webkit-tap-highlight-color: transparent;
@@ -901,19 +914,7 @@ textarea#msg-input:focus { border-color: var(--accent); }
 }
 .fork-item:hover { background: rgba(255,255,255,0.08); border-color: var(--accent); }
 
-#fork-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 4px 9px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-#fork-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
-#fork-btn:active { background: rgba(255,255,255,0.08); }
+/* #fork-btn now uses .header-action-btn */
 
 /* ── Session dropdown ────────────────────────────────── */
 
@@ -1048,6 +1049,110 @@ textarea#msg-input:focus { border-color: var(--accent); }
 .thinking-btn:not(.active):hover {
   color: var(--text);
   background: rgba(255,255,255,0.06);
+}
+
+/* ── Thinking cycle button (mobile only) ────────────────── */
+
+#thinking-cycle {
+  display: none;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 2px 7px;
+  cursor: pointer;
+  min-width: 36px;
+  text-align: center;
+}
+
+#thinking-cycle.active-glow {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#thinking-cycle:active { background: rgba(255,255,255,0.08); }
+
+/* ── Header overflow menu (mobile only) ─────────────────── */
+
+#overflow-menu {
+  display: none;
+  position: relative;
+}
+
+#overflow-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  padding: 3px 9px;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+#overflow-btn:hover { color: var(--text); background: var(--surface2); }
+
+#overflow-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 160px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  z-index: 100;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#overflow-panel.hidden { display: none; }
+
+#overflow-panel button {
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 14px;
+  padding: 11px 16px;
+  cursor: pointer;
+  text-align: left;
+}
+#overflow-panel button:last-child { border-bottom: none; }
+#overflow-panel button:hover { background: rgba(255,255,255,0.07); }
+#overflow-panel button:active { background: rgba(255,255,255,0.1); }
+
+/* ── Unified header action button style (desktop) ───────── */
+
+.header-action-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 4px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.header-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+.header-action-btn:active { background: rgba(255,255,255,0.08); }
+
+/* ── Mobile: swap to cycle buttons & overflow menu ──────── */
+
+@media (max-width: 600px) {
+  /* Header: hide individual action buttons + session dropdown, show overflow */
+  .header-action-btn { display: none !important; }
+  #session-dropdown { display: none !important; }
+  #overflow-menu { display: block; }
+
+  /* Footer: hide segmented controls, show cycle buttons */
+  #mode-segmented { display: none !important; }
+  #mode-cycle { display: inline-block; }
+  #thinking-segmented { display: none !important; }
+  .thinking-label { display: none !important; }
+  #thinking-cycle { display: inline-block; }
 }
 
 /* ── Code block copy button ──────────────────────────── */

@@ -39,9 +39,20 @@
     </div>
     <div id="header-right">
       <span id="session-stats"></span>
-      <button id="fork-btn" title="Fork conversation">⑂ Fork</button>
-      <button id="export-btn" title="Export conversation">↓ Export</button>
-      <button id="compact-btn" title="Compact context">⟳ Compact</button>
+      <!-- Desktop: individual action buttons -->
+      <button id="fork-btn" class="header-action-btn" title="Fork conversation">⑂ Fork</button>
+      <button id="export-btn" class="header-action-btn" title="Export conversation">↓ Export</button>
+      <button id="compact-btn" class="header-action-btn" title="Compact context">⟳ Compact</button>
+      <!-- Mobile: overflow menu (sessions + above 3) -->
+      <div id="overflow-menu">
+        <button id="overflow-btn" title="More actions">⋯</button>
+        <div id="overflow-panel" class="hidden">
+          <button id="overflow-sessions">⎇ Sessions</button>
+          <button id="overflow-fork">⑂ Fork</button>
+          <button id="overflow-export">↓ Export</button>
+          <button id="overflow-compact">⟳ Compact</button>
+        </div>
+      </div>
       <button id="abort-btn" title="Abort" disabled>■ Stop</button>
     </div>
   </header>
@@ -89,20 +100,25 @@
       <button id="send-btn" class="btn-primary" disabled>Send</button>
     </div>
     <div id="mode-row">
-      <label class="mode-opt">
-        <input type="radio" name="send-mode" value="prompt" checked /> Prompt
-      </label>
-      <label class="mode-opt">
-        <input type="radio" name="send-mode" value="steer" /> Steer
-      </label>
-      <label class="mode-opt">
-        <input type="radio" name="send-mode" value="follow_up" /> Follow-up
-      </label>
+      <!-- Desktop: segmented mode selector -->
+      <div id="mode-segmented">
+        <button class="mode-btn active" data-mode="prompt">Prompt</button>
+        <button class="mode-btn" data-mode="steer">Steer</button>
+        <button class="mode-btn" data-mode="follow_up">Follow-up</button>
+      </div>
+      <!-- Mobile: single cycling mode button -->
+      <button id="mode-cycle">Prompt</button>
+
       <div id="thinking-control" title="Thinking level">
         <span class="thinking-label">🧠</span>
-        <button class="thinking-btn active" data-level="none" title="No thinking">Off</button>
-        <button class="thinking-btn" data-level="low" title="Low thinking">Low</button>
-        <button class="thinking-btn" data-level="high" title="High thinking">High</button>
+        <!-- Desktop: segmented thinking selector -->
+        <div id="thinking-segmented">
+          <button class="thinking-btn active" data-level="none" title="No thinking">Off</button>
+          <button class="thinking-btn" data-level="low" title="Low thinking">Low</button>
+          <button class="thinking-btn" data-level="high" title="High thinking">High</button>
+        </div>
+        <!-- Mobile: single cycling thinking button -->
+        <button id="thinking-cycle">Off</button>
       </div>
     </div>
   </footer>

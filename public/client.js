@@ -24,6 +24,10 @@ const forkBtn        = document.getElementById("fork-btn");
 const exportBtn      = document.getElementById("export-btn");
 const compactBtn     = document.getElementById("compact-btn");
 const abortBtn       = document.getElementById("abort-btn");
+const overflowBtn    = document.getElementById("overflow-btn");
+const overflowPanel  = document.getElementById("overflow-panel");
+const modeCycleBtn   = document.getElementById("mode-cycle");
+const thinkingCycleBtn = document.getElementById("thinking-cycle");
 const conversation   = document.getElementById("conversation");
 const cmdPicker      = document.getElementById("cmd-picker");
 const cmdList        = document.getElementById("cmd-list");
@@ -77,6 +81,16 @@ let modelPanelFocusIdx = -1;
 // Current active dialog
 let activeDialog = null; // { id, method, resolve }
 
+// Current send mode
+let currentMode = "prompt"; // "prompt" | "steer" | "follow_up"
+const MODE_CYCLE = ["prompt", "steer", "follow_up"];
+const MODE_LABELS = { prompt: "Prompt", steer: "Steer", follow_up: "Follow-up" };
+
+// Current thinking level
+let currentThinkingLevel = localStorage.getItem("thinking-level") ?? "none";
+const THINKING_CYCLE = ["none", "low", "high"];
+const THINKING_LABELS = { none: "Off", low: "Low", high: "High" };
+
 // Streaming render state
 let streamingTurn = null; // { textEl, thinkingEl, thinkingRaw, textRaw, toolCards: Map<toolCallId, el> }
 
@@ -112,6 +126,10 @@ function connect() {
     isConnected = true;
     reconnectDelay = 1000;
     setConnectionStatus("connected");
+    // Restore saved thinking level
+    if (currentThinkingLevel !== "none") {
+      sendWithId({ type: "set_thinking_level", level: currentThinkingLevel });
+    }
   });
 
   ws.addEventListener("close", () => {
@@ -1141,7 +1159,7 @@ function updateSendButton() {
 // ─── Sending ──────────────────────────────────────────────────────────────────
 
 function getMode() {
-  return document.querySelector('input[name="send-mode"]:checked')?.value ?? "prompt";
+  return currentMode;
 }
 
 function sendMessage() {
@@ -1281,12 +1299,7 @@ document.addEventListener("keydown", (e) => {
     const modeMap = { "Digit1": "prompt", "Digit2": "steer", "Digit3": "follow_up" };
     if (modeMap[e.code]) {
       e.preventDefault();
-      const radio = document.querySelector(`input[name="send-mode"][value="${modeMap[e.code]}"]`);
-      if (radio) {
-        radio.checked = true;
-        radio.closest("label").classList.add("mode-flash");
-        setTimeout(() => radio.closest("label").classList.remove("mode-flash"), 400);
-      }
+      applyMode(modeMap[e.code]);
       return;
     }
     // Alt+M — toggle model dropdown
@@ -1535,15 +1548,96 @@ function renderSessionList(sessions) {
 
 
 
+// ─── Mode control ────────────────────────────────────────────────────────────
+
+function applyMode(mode) {
+  currentMode = mode;
+  // Segmented buttons
+  document.querySelectorAll(".mode-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.mode === mode);
+  });
+  // Cycle button
+  modeCycleBtn.textContent = MODE_LABELS[mode] ?? mode;
+}
+
+document.querySelectorAll(".mode-btn").forEach((btn) => {
+  btn.addEventListener("click", () => applyMode(btn.dataset.mode));
+});
+
+modeCycleBtn.addEventListener("click", () => {
+  const next = MODE_CYCLE[(MODE_CYCLE.indexOf(currentMode) + 1) % MODE_CYCLE.length];
+  applyMode(next);
+});
+
 // ─── Thinking level control ───────────────────────────────────────────────────
 
-document.querySelectorAll(".thinking-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".thinking-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    const level = btn.dataset.level;
-    sendWithId({ type: "set_thinking_level", level });
+function applyThinkingLevel(level, sendRpc = true) {
+  currentThinkingLevel = level;
+  localStorage.setItem("thinking-level", level);
+
+  // Segmented buttons
+  document.querySelectorAll(".thinking-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.level === level);
   });
+  // Cycle button
+  thinkingCycleBtn.textContent = THINKING_LABELS[level] ?? level;
+  thinkingCycleBtn.classList.toggle("active-glow", level !== "none");
+
+  if (sendRpc) sendWithId({ type: "set_thinking_level", level });
+}
+
+document.querySelectorAll(".thinking-btn").forEach((btn) => {
+  btn.addEventListener("click", () => applyThinkingLevel(btn.dataset.level));
+});
+
+thinkingCycleBtn.addEventListener("click", () => {
+  const next = THINKING_CYCLE[(THINKING_CYCLE.indexOf(currentThinkingLevel) + 1) % THINKING_CYCLE.length];
+  applyThinkingLevel(next);
+});
+
+// Apply saved thinking level on load (RPC sent after first connect)
+applyThinkingLevel(currentThinkingLevel, false);
+
+// ─── Overflow menu ────────────────────────────────────────────────────────────
+
+let overflowOpen = false;
+
+overflowBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  overflowOpen = !overflowOpen;
+  overflowPanel.classList.toggle("hidden", !overflowOpen);
+});
+
+document.addEventListener("click", (e) => {
+  if (overflowOpen && !overflowPanel.contains(e.target) && e.target !== overflowBtn) {
+    overflowOpen = false;
+    overflowPanel.classList.add("hidden");
+  }
+});
+
+function closeOverflow() {
+  overflowOpen = false;
+  overflowPanel.classList.add("hidden");
+}
+
+document.getElementById("overflow-sessions").addEventListener("click", () => {
+  closeOverflow();
+  openSessionPanel();
+});
+
+document.getElementById("overflow-fork").addEventListener("click", () => {
+  closeOverflow();
+  openForkPanel();
+});
+
+document.getElementById("overflow-export").addEventListener("click", () => {
+  closeOverflow();
+  exportBtn.click();
+});
+
+document.getElementById("overflow-compact").addEventListener("click", () => {
+  closeOverflow();
+  compactBtn.click();
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
