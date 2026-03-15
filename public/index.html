@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>pi remote</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Header / status bar -->
+  <header id="header">
+    <span id="status-dot" class="dot idle"></span>
+    <span id="status-text">idle</span>
+    <span id="session-label">pi remote</span>
+    <button id="abort-btn" title="Abort" disabled>■ Stop</button>
+  </header>
+
+  <!-- Conversation -->
+  <main id="conversation"></main>
+
+  <!-- Tool activity banner -->
+  <div id="tool-banner" class="hidden">
+    <span id="tool-name"></span>
+    <span id="tool-output" class="tool-output"></span>
+  </div>
+
+  <!-- Confirm dialog overlay -->
+  <div id="confirm-overlay" class="hidden">
+    <div id="confirm-box">
+      <h3 id="confirm-title"></h3>
+      <p id="confirm-message"></p>
+      <div class="confirm-buttons">
+        <button id="confirm-deny" class="btn-danger">Deny</button>
+        <button id="confirm-allow" class="btn-primary">Allow</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Input area -->
+  <footer id="input-area">
+    <div id="input-row">
+      <textarea
+        id="msg-input"
+        placeholder="Send a message…"
+        rows="1"
+        autocorrect="off"
+        autocapitalize="sentences"
+        spellcheck="true"
+      ></textarea>
+      <button id="send-btn" class="btn-primary" disabled>Send</button>
+    </div>
+    <div id="mode-row">
+      <label class="mode-opt">
+        <input type="radio" name="send-mode" value="prompt" checked /> Prompt
+      </label>
+      <label class="mode-opt">
+        <input type="radio" name="send-mode" value="steer" /> Steer
+      </label>
+      <label class="mode-opt">
+        <input type="radio" name="send-mode" value="follow_up" /> Follow-up
+      </label>
+    </div>
+  </footer>
+
+  <script src="client.js"></script>
+</body>
+</html>
