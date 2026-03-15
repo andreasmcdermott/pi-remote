@@ -35,7 +35,8 @@ body {
   display: flex;
   flex-direction: column;
   height: 100dvh;
-  background: var(--bg);
+  /* Match footer surface so the safe-area gap below the footer isn't black */
+  background: var(--surface);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 15px;
