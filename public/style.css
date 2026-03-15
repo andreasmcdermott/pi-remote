@@ -625,29 +625,14 @@ textarea#msg-input:focus { border-color: var(--accent); }
 
 #mode-segmented {
   display: flex;
+  align-items: center;
   gap: 3px;
 }
 
-.mode-btn {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 5px;
+.mode-label {
+  font-size: 13px;
+  margin-right: 2px;
   color: var(--text-dim);
-  font-size: 11px;
-  padding: 2px 8px;
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s;
-}
-
-.mode-btn.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.mode-btn:not(.active):hover {
-  color: var(--text);
-  background: rgba(255,255,255,0.06);
 }
 
 /* ── Mode cycle button (mobile only) ────────────────────── */
@@ -1031,7 +1016,8 @@ textarea#msg-input:focus { border-color: var(--accent); }
   margin-right: 2px;
 }
 
-.thinking-btn {
+.thinking-btn,
+.mode-btn {
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -1042,13 +1028,15 @@ textarea#msg-input:focus { border-color: var(--accent); }
   transition: background 0.1s, color 0.1s;
 }
 
-.thinking-btn.active {
+.thinking-btn.active,
+.mode-btn.active {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
 
-.thinking-btn:not(.active):hover {
+.thinking-btn:not(.active):hover,
+.mode-btn:not(.active):hover {
   color: var(--text);
   background: rgba(255,255,255,0.06);
 }
