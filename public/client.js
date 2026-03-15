@@ -12,7 +12,9 @@ marked.setOptions({ breaks: true });
 // ─── DOM refs ────────────────────────────────────────────────────────────────
 const statusDot      = document.getElementById("status-dot");
 const statusText     = document.getElementById("status-text");
-const modelName      = document.getElementById("model-name");
+const modelBtn       = document.getElementById("model-btn");
+const modelPanel     = document.getElementById("model-panel");
+const modelList      = document.getElementById("model-list");
 const sessionStats   = document.getElementById("session-stats");
 const abortBtn       = document.getElementById("abort-btn");
 const conversation   = document.getElementById("conversation");
@@ -40,6 +42,24 @@ let reqCounter       = 0;
 
 // Slash commands list (populated from get_commands response)
 let availableCommands = [];
+
+// All available models (populated from get_available_models response)
+let allAvailableModels = [];
+
+// Recent models (pushed from bridge via prefs message)
+let recentModels = [];
+
+// Currently active model
+let activeModel = null;
+
+// Whether the dropdown is showing all models or just recents
+let modelPanelShowingAll = false;
+
+// Whether the dropdown panel is open
+let modelPanelOpen = false;
+
+// Keyboard-focused index within the panel (-1 = none)
+let modelPanelFocusIdx = -1;
 
 // Current active dialog
 let activeDialog = null; // { id, method, resolve }
@@ -109,6 +129,22 @@ function handleMessage(msg) {
   // Commands mirrored from another connected client
   if (msg.type === "prompt" || msg.type === "steer" || msg.type === "follow_up") {
     handleMirroredCommand(msg);
+    return;
+  }
+
+  // Model switch mirrored from another client — update our dropdown
+  if (msg.type === "set_model") {
+    if (msg.provider && msg.modelId) {
+      const m = allAvailableModels.find(m => m.id === msg.modelId && m.provider === msg.provider);
+      if (m) setSelectedModel(m);
+    }
+    return;
+  }
+
+  // Prefs pushed from bridge (recents, etc.)
+  if (msg.type === "prefs") {
+    recentModels = msg.recentModels ?? [];
+    renderModelPanel();
     return;
   }
 
@@ -204,6 +240,14 @@ function handleResponse(msg) {
       availableCommands = msg.data.commands ?? [];
       break;
 
+    case "get_available_models":
+      populateModelSelect(msg.data.models ?? []);
+      break;
+
+    case "set_model":
+      if (msg.data) setSelectedModel(msg.data);
+      break;
+
     case "get_session_stats":
       applyStats(msg.data);
       break;
@@ -216,10 +260,119 @@ function applyState(data) {
   if (!data) return;
   isStreaming = data.isStreaming ?? false;
   setAgentStatus(isStreaming ? "running" : "idle");
-  if (data.model) {
-    modelName.textContent = data.model.name ?? data.model.id ?? "pi remote";
+  if (data.model) setSelectedModel(data.model);
+}
+
+// Recent models are managed by the bridge and pushed via "prefs" messages.
+// No localStorage needed — recents are shared across all clients.
+
+// ─── Model dropdown ───────────────────────────────────────────────────────────
+
+function populateModelSelect(models) {
+  allAvailableModels = models;
+  modelPanelShowingAll = false;
+  modelBtn.disabled = models.length === 0;
+  renderModelPanel();
+}
+
+function renderModelPanel() {
+  const models = allAvailableModels;
+
+  const recentAvailable = recentModels
+    .map(r => models.find(m => m.id === r.id && m.provider === r.provider))
+    .filter(Boolean);
+
+  const recentIds = new Set(recentAvailable.map(m => `${m.provider}/${m.id}`));
+  const remaining = models.filter(m => !recentIds.has(`${m.provider}/${m.id}`));
+
+  modelList.innerHTML = "";
+
+  function addGroupLabel(text) {
+    const el = document.createElement("div");
+    el.className = "model-group-label";
+    el.textContent = text;
+    modelList.appendChild(el);
+  }
+
+  function addModelBtn(m) {
+    const btn = document.createElement("button");
+    const isCurrent = activeModel?.id === m.id && activeModel?.provider === m.provider;
+    btn.className = "model-option" + (isCurrent ? " active" : "");
+    btn.textContent = m.name ?? m.id;
+    btn.addEventListener("click", () => {
+      sendWithId({ type: "set_model", provider: m.provider, modelId: m.id });
+      closeModelPanel();
+    });
+    modelList.appendChild(btn);
+  }
+
+  if (recentAvailable.length > 0) {
+    addGroupLabel("Recent");
+    recentAvailable.forEach(addModelBtn);
+  }
+
+  if (modelPanelShowingAll || recentAvailable.length === 0) {
+    if (remaining.length > 0) {
+      if (recentAvailable.length > 0) addGroupLabel("All models");
+      remaining.forEach(addModelBtn);
+    }
+  } else if (remaining.length > 0) {
+    const showAll = document.createElement("button");
+    showAll.className = "model-option model-show-all";
+    showAll.textContent = `Show all (${models.length})…`;
+    showAll.addEventListener("click", (e) => {
+      e.stopPropagation(); // keep panel open
+      modelPanelShowingAll = true;
+      renderModelPanel();
+    });
+    modelList.appendChild(showAll);
   }
 }
+
+function setSelectedModel(model) {
+  activeModel = model;
+  modelBtn.textContent = model.name ?? model.id;
+  if (modelPanelOpen) renderModelPanel(); // refresh active highlight if open
+}
+
+function openModelPanel() {
+  if (modelBtn.disabled) return;
+  modelPanelShowingAll = false;
+  renderModelPanel();
+  modelPanel.classList.remove("hidden");
+  modelPanelOpen = true;
+  modelPanelFocusIdx = -1;
+  // Pre-focus the active model
+  const btns = getModelPanelBtns();
+  const activeIdx = btns.findIndex(b => b.classList.contains("active"));
+  if (activeIdx !== -1) setModelPanelFocus(activeIdx);
+}
+
+function closeModelPanel() {
+  modelPanel.classList.add("hidden");
+  modelPanelOpen = false;
+  modelPanelFocusIdx = -1;
+}
+
+function getModelPanelBtns() {
+  return [...modelList.querySelectorAll("button.model-option")];
+}
+
+function setModelPanelFocus(idx) {
+  const btns = getModelPanelBtns();
+  btns.forEach(b => b.classList.remove("focused"));
+  if (idx < 0 || idx >= btns.length) { modelPanelFocusIdx = -1; return; }
+  modelPanelFocusIdx = idx;
+  btns[idx].classList.add("focused");
+  btns[idx].scrollIntoView({ block: "nearest" });
+}
+
+modelBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  modelPanelOpen ? closeModelPanel() : openModelPanel();
+});
+
+document.addEventListener("click", () => closeModelPanel());
 
 function applyStats(data) {
   if (!data) return;
@@ -948,16 +1101,41 @@ document.addEventListener("keydown", (e) => {
       const radio = document.querySelector(`input[name="send-mode"][value="${modeMap[e.code]}"]`);
       if (radio) {
         radio.checked = true;
-        // Brief visual flash on the mode row so the switch is obvious
         radio.closest("label").classList.add("mode-flash");
         setTimeout(() => radio.closest("label").classList.remove("mode-flash"), 400);
       }
       return;
     }
+    // Alt+M — toggle model dropdown
+    if (e.code === "KeyM") {
+      e.preventDefault();
+      modelPanelOpen ? closeModelPanel() : openModelPanel();
+      return;
+    }
   }
 
-  // Double Escape — abort
+  // Arrow keys / Enter — navigate open model panel
+  if (modelPanelOpen && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const btns = getModelPanelBtns();
+      const next = e.key === "ArrowDown"
+        ? Math.min(modelPanelFocusIdx + 1, btns.length - 1)
+        : Math.max(modelPanelFocusIdx - 1, 0);
+      setModelPanelFocus(next);
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const btns = getModelPanelBtns();
+      if (modelPanelFocusIdx >= 0) btns[modelPanelFocusIdx]?.click();
+      return;
+    }
+  }
+
+  // Double Escape — abort (also closes model panel on first press)
   if (e.key === "Escape" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    if (modelPanelOpen) { closeModelPanel(); return; }
     const now = Date.now();
     if (now - lastEscapeTime < 500) {
       e.preventDefault();
@@ -969,6 +1147,9 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+
+
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
 connect();
+msgInput.focus();

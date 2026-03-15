@@ -15,7 +15,7 @@
  * send extension_ui_response wins and it is forwarded to pi stdin.
  */
 
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { StringDecoder } from "string_decoder";
@@ -31,6 +31,35 @@ const CWD = process.env.AGENT_CWD ?? process.cwd();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PUBLIC_DIR = join(__dirname, "public");
+
+// ---------------------------------------------------------------------------
+// Prefs (persisted across restarts)
+// ---------------------------------------------------------------------------
+
+interface ModelRef {
+  id: string;
+  name: string;
+  provider: string;
+}
+
+interface Prefs {
+  lastModel?: { provider: string; modelId: string };
+  recentModels?: ModelRef[];
+}
+
+const PREFS_PATH = join(__dirname, "prefs.json");
+
+function loadPrefs(): Prefs {
+  try { return JSON.parse(readFileSync(PREFS_PATH, "utf8")); }
+  catch { return {}; }
+}
+
+function savePrefs(prefs: Prefs): void {
+  try { writeFileSync(PREFS_PATH, JSON.stringify(prefs, null, 2)); }
+  catch (e) { console.error("[bridge] failed to save prefs:", e); }
+}
+
+const prefs = loadPrefs();
 
 // ---------------------------------------------------------------------------
 // Spawn pi --mode rpc
@@ -67,6 +96,23 @@ let bridgeReqCounter = 0;
 function nextBridgeId(): string {
   return `bridge-${++bridgeReqCounter}`;
 }
+
+function addRecentModel(model: ModelRef): void {
+  const recent = (prefs.recentModels ?? []).filter(
+    m => !(m.id === model.id && m.provider === model.provider)
+  );
+  recent.unshift(model);
+  prefs.recentModels = recent.slice(0, 5);
+  savePrefs(prefs);
+}
+
+function prefsMessage(): string {
+  return JSON.stringify({ type: "prefs", recentModels: prefs.recentModels ?? [] });
+}
+
+// Restore the saved model on the first client connection (pi is guaranteed
+// ready by then). Subsequent connects skip this.
+let hasRestoredModel = false;
 
 // ---------------------------------------------------------------------------
 // Communicate with pi
@@ -162,6 +208,13 @@ attachJsonlReader(pi.stdout as ReadableStream<Uint8Array>, (line) => {
 
   // Route: responses with id → specific client or broadcast; events → broadcast
   if (parsed.type === "response" && parsed.id != null) {
+    // When a set_model succeeds, update recents and push updated prefs to all clients
+    if (parsed.command === "set_model" && parsed.success && parsed.data) {
+      const m = parsed.data;
+      addRecentModel({ id: m.id, name: m.name ?? m.id, provider: m.provider });
+      broadcast(prefsMessage());
+    }
+
     const target = pendingResponseRoutes.get(parsed.id);
     if (target !== undefined) {
       pendingResponseRoutes.delete(parsed.id);
@@ -204,10 +257,16 @@ function handleClientMessage(ws: any, raw: string): void {
     pendingResponseRoutes.set(cmd.id, ws);
   }
 
+  // Persist model choice and update recents
+  if (cmd.type === "set_model" && cmd.provider && cmd.modelId) {
+    prefs.lastModel = { provider: cmd.provider, modelId: cmd.modelId };
+    savePrefs(prefs);
+  }
+
   sendToPi(cmd);
 
   // Fan-out user-visible commands to all OTHER clients so their UI stays in sync
-  if (cmd.type === "prompt" || cmd.type === "steer" || cmd.type === "follow_up") {
+  if (cmd.type === "prompt" || cmd.type === "steer" || cmd.type === "follow_up" || cmd.type === "set_model") {
     for (const other of clients) {
       if (other !== ws) sendToWs(other, raw);
     }
@@ -228,9 +287,25 @@ function bootstrapClient(ws: any): void {
   pendingResponseRoutes.set(messagesId, ws);
   pendingResponseRoutes.set(commandsId, ws);
 
+  const modelsId = nextBridgeId();
+  pendingResponseRoutes.set(modelsId, ws);
+
+  // Send current prefs immediately (no round-trip needed)
+  sendToWs(ws, prefsMessage());
+
   sendToPi({ type: "get_state", id: stateId });
   sendToPi({ type: "get_messages", id: messagesId });
   sendToPi({ type: "get_commands", id: commandsId });
+  sendToPi({ type: "get_available_models", id: modelsId });
+
+  // On first connect, restore the saved model (pi is ready by this point)
+  if (!hasRestoredModel && prefs.lastModel) {
+    hasRestoredModel = true;
+    console.log(`[bridge] Restoring last model: ${prefs.lastModel.modelId}`);
+    const restoreId = nextBridgeId();
+    pendingResponseRoutes.set(restoreId, null); // broadcast to all
+    sendToPi({ type: "set_model", id: restoreId, ...prefs.lastModel });
+  }
 }
 
 // ---------------------------------------------------------------------------

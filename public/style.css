@@ -93,10 +93,94 @@ body {
   color: var(--text-dim);
 }
 
-#model-name {
+/* ── Model dropdown ──────────────────────────────────── */
+#model-dropdown {
+  position: relative;
+}
+#model-btn {
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 18px 2px 6px;
+  border-radius: 6px;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: relative;
+}
+#model-btn::after {
+  content: "▾";
+  position: absolute;
+  right: 4px;
+  opacity: 0.6;
+}
+#model-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+#model-btn:not(:disabled):hover {
+  background: var(--surface2);
+}
+#model-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  z-index: 100;
+}
+.model-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  padding: 8px 12px 4px;
+}
+.model-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 14px;
+  padding: 8px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-option:hover {
+  background: rgba(255,255,255,0.07);
+}
+.model-option.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+.model-option.focused {
+  background: rgba(255,255,255,0.07);
+  outline: none;
+}
+.model-show-all {
+  font-size: 13px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+}
+.model-show-all:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.05);
 }
 
 #session-stats {
@@ -659,6 +743,26 @@ textarea#msg-input:focus { border-color: var(--accent); }
 .bubble.assistant th {
   background: rgba(255,255,255,0.05);
   font-weight: 600;
+}
+
+/* ── Scrollbars ──────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 /* ── Mode flash (keyboard shortcut feedback) ─────────── */
