@@ -821,11 +821,13 @@ textarea#msg-input:focus { border-color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text-dim);
-  font-size: 16px;
-  line-height: 1.5;
-  padding: 10px 10px;
+  font-size: 18px;
+  padding: 0 10px;
   cursor: pointer;
   flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
   -webkit-tap-highlight-color: transparent;
 }
 #attach-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
