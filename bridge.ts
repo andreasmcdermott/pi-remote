@@ -141,23 +141,30 @@ session.subscribe((event) => {
     case "message_update": {
       const e = event.assistantMessageEvent;
       if (e.type === "text_delta") {
+        process.stdout.write(e.delta);
         broadcast({ type: "text_delta", delta: e.delta });
       }
       break;
     }
     case "tool_execution_start":
+      process.stdout.write(`\n\n[tool: ${event.toolName}] `);
       broadcast({ type: "tool_start", toolName: event.toolName, args: event.args });
       break;
     case "tool_execution_update":
+      // Don't flood the terminal with tool output — just a dot per update
+      process.stdout.write(".");
       broadcast({ type: "tool_update", toolName: event.toolName, output: event.output ?? "" });
       break;
     case "tool_execution_end":
+      process.stdout.write(event.isError ? " ✗\n" : " ✓\n");
       broadcast({ type: "tool_end", toolName: event.toolName, isError: event.isError });
       break;
     case "agent_start":
+      process.stdout.write("\n");
       broadcast({ type: "agent_start" });
       break;
     case "agent_end":
+      process.stdout.write("\n");
       broadcast({ type: "agent_end" });
       break;
     case "auto_compaction_start":
@@ -217,15 +224,18 @@ async function handleCommand(ws: WebSocket, cmd: ClientCommand) {
         if (session.isStreaming) {
           sendTo(ws, { type: "error", message: "Agent is busy. Use steer or follow_up." });
         } else {
+          console.log(`\n[user] ${cmd.text}`);
           session.prompt(cmd.text).catch((err) => {
             broadcast({ type: "error", message: String(err) });
           });
         }
         break;
       case "steer":
+        console.log(`\n[steer] ${cmd.text}`);
         await session.steer(cmd.text);
         break;
       case "follow_up":
+        console.log(`\n[follow_up] ${cmd.text}`);
         await session.followUp(cmd.text);
         break;
       case "abort":

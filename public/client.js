@@ -22,12 +22,17 @@ const confirmDeny    = document.getElementById("confirm-deny");
 const msgInput     = document.getElementById("msg-input");
 const sendBtn      = document.getElementById("send-btn");
 
+// ─── marked configuration ────────────────────────────────────────────────────
+
+marked.setOptions({ breaks: true });   // single newline → <br> inside paragraphs
+
 // ─── State ───────────────────────────────────────────────────────────────────
 
 let ws = null;
 let isConnected = false;
 let isAgentRunning = false;
 let currentAssistantBubble = null; // bubble being streamed into
+let currentAssistantRaw = "";      // accumulated raw markdown for current bubble
 let reconnectDelay = 1000;
 let pendingConfirmId = null;
 
@@ -133,12 +138,13 @@ function handleEvent(event) {
 function renderHistory(messages) {
   conversation.innerHTML = "";
   currentAssistantBubble = null;
+  currentAssistantRaw = "";
   for (const msg of messages) {
     if (msg.role === "user") {
       appendUserBubble(msg.content);
     } else {
       const b = createBubble("assistant");
-      b.textContent = msg.content;
+      b.innerHTML = marked.parse(msg.content);
       conversation.appendChild(b);
     }
   }
@@ -162,15 +168,21 @@ function appendAssistantDelta(delta) {
   if (!currentAssistantBubble) {
     currentAssistantBubble = createBubble("assistant streaming");
     conversation.appendChild(currentAssistantBubble);
+    currentAssistantRaw = "";
   }
-  currentAssistantBubble.textContent += delta;
+  currentAssistantRaw += delta;
+  // While streaming, render as plain text for speed (no mid-stream markdown flicker)
+  currentAssistantBubble.textContent = currentAssistantRaw;
   scrollToBottom();
 }
 
 function finaliseAssistantBubble() {
   if (currentAssistantBubble) {
+    // Swap plain text for rendered markdown now that the response is complete
+    currentAssistantBubble.innerHTML = marked.parse(currentAssistantRaw);
     currentAssistantBubble.classList.remove("streaming");
     currentAssistantBubble = null;
+    currentAssistantRaw = "";
   }
 }
 

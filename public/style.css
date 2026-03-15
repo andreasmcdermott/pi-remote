@@ -252,7 +252,7 @@ textarea#msg-input {
   border-radius: 10px;
   color: var(--text);
   font-family: inherit;
-  font-size: 15px;
+  font-size: 16px; /* must be ≥16px to prevent iOS Safari auto-zoom on focus */
   padding: 10px 12px;
   resize: none;
   max-height: 140px;
@@ -306,6 +306,99 @@ textarea#msg-input:focus { border-color: var(--accent); }
   cursor: pointer;
 }
 .btn-danger:active { opacity: 0.8; }
+
+/* ── Markdown rendering inside assistant bubbles ─────── */
+
+.bubble.assistant p {
+  margin: 0 0 0.6em;
+}
+.bubble.assistant p:last-child {
+  margin-bottom: 0;
+}
+
+.bubble.assistant h1,
+.bubble.assistant h2,
+.bubble.assistant h3,
+.bubble.assistant h4 {
+  margin: 0.8em 0 0.3em;
+  font-size: 1em;
+  font-weight: 700;
+  color: var(--text);
+}
+.bubble.assistant h1:first-child,
+.bubble.assistant h2:first-child,
+.bubble.assistant h3:first-child {
+  margin-top: 0;
+}
+
+.bubble.assistant ul,
+.bubble.assistant ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+.bubble.assistant li {
+  margin-bottom: 0.2em;
+}
+
+.bubble.assistant code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: rgba(255,255,255,0.07);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.bubble.assistant pre {
+  background: #0a0a0a;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+  -webkit-overflow-scrolling: touch;
+}
+.bubble.assistant pre code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre;
+}
+
+.bubble.assistant blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0.5em 0;
+  padding: 2px 0 2px 12px;
+  color: var(--text-dim);
+}
+
+.bubble.assistant hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.8em 0;
+}
+
+.bubble.assistant a {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.bubble.assistant table {
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 0.6em 0;
+  width: 100%;
+}
+.bubble.assistant th,
+.bubble.assistant td {
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+  text-align: left;
+}
+.bubble.assistant th {
+  background: rgba(255,255,255,0.05);
+  font-weight: 600;
+}
 
 /* ── Utility ─────────────────────────────────────────── */
 .hidden { display: none !important; }
