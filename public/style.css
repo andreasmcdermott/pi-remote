@@ -586,7 +586,7 @@ body {
   flex-shrink: 0;
   background: var(--surface);
   border-top: 1px solid var(--border);
-  padding: 10px 12px max(var(--safe-bottom), 10px);
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
