@@ -16,6 +16,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { randomUUID } from "crypto";
 import { readFileSync } from "fs";
+import { createInterface } from "readline";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -333,3 +334,35 @@ const server = Bun.serve({
 
 console.log(`[bridge] Listening on http://0.0.0.0:${PORT}`);
 console.log(`[bridge] Open on your phone: http://<tailscale-ip>:${PORT}`);
+console.log(`[bridge] Type a message and press Enter to prompt. Prefix with '> ' for follow-up. Type 'abort' to stop.`);
+console.log();
+
+// ---------------------------------------------------------------------------
+// Terminal input loop
+// ---------------------------------------------------------------------------
+
+const rl = createInterface({ input: process.stdin, terminal: false });
+
+rl.on("line", (line) => {
+  const text = line.trim();
+  if (!text) return;
+
+  if (text === "abort") {
+    console.log("[abort]");
+    session.abort().catch((err) => console.error("[bridge] abort error:", err));
+    return;
+  }
+
+  // Prefix '> ' → follow-up; otherwise prompt (idle) or steer (running)
+  if (text.startsWith("> ")) {
+    const msg = text.slice(2).trim();
+    console.log(`\n[follow_up] ${msg}`);
+    session.followUp(msg).catch((err) => console.error("[bridge] follow_up error:", err));
+  } else if (session.isStreaming) {
+    console.log(`\n[steer] ${text}`);
+    session.steer(text).catch((err) => console.error("[bridge] steer error:", err));
+  } else {
+    console.log(`\n[user] ${text}`);
+    session.prompt(text).catch((err) => console.error("[bridge] prompt error:", err));
+  }
+});
