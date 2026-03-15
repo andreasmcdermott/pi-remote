@@ -529,7 +529,8 @@ function renderHistory(messages) {
     switch (msg.role) {
       case "user": {
         const text = extractUserText(msg.content);
-        if (text) appendUserBubble(text);
+        const images = extractUserImages(msg.content);
+        if (text || images.length) appendUserBubble(text, images);
         break;
       }
 
@@ -592,6 +593,11 @@ function extractUserText(content) {
       .join("");
   }
   return "";
+}
+
+function extractUserImages(content) {
+  if (!Array.isArray(content)) return [];
+  return content.filter(c => c.type === "image" && c.data && c.mimeType);
 }
 
 function extractToolResultText(content) {
