@@ -4,19 +4,27 @@ A mobile remote for the [pi coding agent](https://shittycodingagent.ai).
 Kick off a task on your laptop, walk away, and monitor + steer it from Safari on your iPhone.
 
 ```
-iPhone (Safari) ──── WebSocket ──── bridge.ts (Bun) ──── pi SDK ──── agent
+iPhone (Safari) ──── WebSocket ──── bridge.ts (Bun) ──── pi --mode rpc ──── agent
                    (Tailscale VPN)
 ```
 
 ## How it works
 
-`bridge.ts` **is** the agent runner — you launch it instead of running `pi` directly.
-It starts a pi agent session via the SDK, serves the web UI over HTTP, and bridges agent
-events to any connected phone clients over WebSocket. There is no separate pi process;
-the bridge owns the session for its entire lifetime.
+`bridge.ts` spawns `pi --mode rpc` as a child process and communicates with it over
+JSONL stdin/stdout using pi's RPC protocol. It serves the web UI over HTTP and
+multiplexes the pi RPC stream across all connected WebSocket clients.
 
-When you're at your laptop you follow progress via terminal output. When you're away, you
-open the phone UI and pick up from wherever the agent is.
+- **pi events** (no `id` field) are broadcast to every connected client.
+- **RPC responses** (with `id`) are routed back to the client that made the request.
+- **Extension UI dialogs** (`extension_ui_request`) are broadcast; the first client
+  to respond wins and the answer is forwarded to pi.
+
+When you connect (or reconnect) the bridge bootstraps your client by fetching
+`get_state`, `get_messages`, `get_commands`, and `get_available_models` from pi so
+your UI is always up to date.
+
+Model and thinking-level preferences are persisted to `prefs.json` and restored
+automatically each time pi starts.
 
 ## Quick start
 
@@ -46,9 +54,10 @@ PORT=8080 bun run bridge.ts
 ```
 
 The bridge will:
-- Start a fresh pi session each time (persisted to the sessions directory for `AGENT_CWD`)
-- Print agent output to the terminal as it runs
+- Spawn `pi --mode rpc` with its working directory set to `AGENT_CWD`
+- Print pi events to the terminal as they arrive
 - Serve the phone UI at `http://0.0.0.0:<PORT>`
+- Exit automatically when the pi process exits
 
 ### 4. Open on your phone
 
@@ -62,82 +71,94 @@ You can type messages directly in the terminal — no need to open the web UI wh
 
 | Input | Behaviour |
 |-------|-----------|
-| `some text` + Enter | Prompt (agent idle) or Steer (agent running) |
-| `> some text` + Enter | Follow-up — queued until the agent finishes |
+| `some text` + Enter | Prompt with steer behaviour (works whether agent is idle or running) |
+| `> some text` + Enter | Follow-up — sent as `follow_up`, queued until the agent finishes |
 | `abort` + Enter | Abort the current operation |
-
-While the agent runs you'll see a compact log alongside your input:
-
-```
-[user] refactor the auth hook
-
-I'll start by reading the current implementation.
-
-[tool: read] ......... ✓
-
-Here's my plan: ...
-
-[tool: bash] .... ✓
-
-Done. The hook has been refactored into three smaller functions.
-```
-
-Streaming assistant text is printed inline. Tool executions show a dot per update and a
-✓/✗ at the end. Steered and follow-up messages are labelled `[steer]` / `[follow_up]`.
 
 ## Phone UI features
 
 | Feature | Notes |
 |---------|-------|
-| Live streaming text | Plain text while in-flight, rendered to markdown on completion |
+| Live streaming text | Streamed via `message_update` events from pi |
 | Markdown rendering | Full support: headings, lists, code blocks, tables, blockquotes |
-| Tool activity banner | Shows current tool name + last line of output |
-| Send modes | **Prompt** (new task), **Steer** (interrupt), **Follow-up** (queue for after) |
+| Tool activity | Shows current tool name + latest output |
+| Send modes | **Prompt**, **Steer**, **Follow-up** |
 | Abort button | Stops the current operation |
-| Conversation history | Full history replayed on connect / reconnect |
-| Auto-reconnect | Exponential back-off up to 15 s — survives brief network blips |
-| Confirm dialogs | safe-bash extension round-trips: Allow / Deny with auto-deny on timeout |
+| Conversation history | Bootstrapped from pi on connect / reconnect |
+| Auto-reconnect | Exponential back-off — survives brief network blips |
+| Extension UI dialogs | `extension_ui_request` round-trips: first client to respond wins; auto-deny on timeout |
+| Model picker | Lists available models; recently-used models are persisted in `prefs.json` |
+| Thinking level | Persisted across restarts |
+| PWA / installable | Includes `manifest.json` and service worker for home-screen install |
 | iOS Safari polish | No auto-zoom on input focus; safe-area padding for notch/home bar |
 
 ## WebSocket protocol
 
-### Server → phone
+The bridge speaks the **pi RPC protocol** over WebSocket — messages are the same JSONL
+objects that pi emits and accepts, forwarded with minimal translation.
+
+### Bridge-only messages (not part of pi RPC)
+
+#### Server → client
 
 ```jsonc
-{ "type": "text_delta",          "delta": "Hello " }
-{ "type": "tool_start",          "toolName": "bash", "args": { "command": "yarn build" } }
-{ "type": "tool_update",         "toolName": "bash", "output": "partial output..." }
-{ "type": "tool_end",            "toolName": "bash", "isError": false }
+// Sent immediately on connect with persisted recent-model history
+{ "type": "prefs", "recentModels": [{ "id": "...", "name": "...", "provider": "..." }] }
+```
+
+#### Client → server
+
+```jsonc
+// List session files for the current AGENT_CWD (handled bridge-side, not forwarded to pi)
+{ "type": "list_sessions", "id": "some-id" }
+// Response:
+{ "type": "response", "command": "list_sessions", "success": true, "id": "some-id",
+  "data": { "sessions": [{ "path": "...", "name": "first user message…", "mtime": 1234567890 }] } }
+```
+
+### Selected pi RPC events (server → client, broadcast)
+
+```jsonc
+{ "type": "message_update", "assistantMessageEvent": { "type": "text_delta", "delta": "Hello " } }
+{ "type": "tool_execution_start", ... }
+{ "type": "tool_execution_update", ... }
+{ "type": "tool_execution_end", ... }
 { "type": "agent_start" }
 { "type": "agent_end" }
-{ "type": "auto_compaction_start" }
-{ "type": "auto_compaction_end" }
-{ "type": "auto_retry_start",    "attempt": 2 }
-{ "type": "auto_retry_end" }
-{ "type": "confirm_request",     "id": "uuid", "title": "Dangerous command", "message": "Allow rm -rf?", "timeout": 30000 }
-{ "type": "history",             "messages": [ { "role": "user", "content": "..." }, ... ] }
-{ "type": "error",               "message": "..." }
+{ "type": "extension_ui_request", "id": "uuid", ... }
 ```
 
-### Phone → server
+### Selected pi RPC commands (client → server, forwarded to pi)
 
 ```jsonc
-{ "type": "prompt",           "text": "Refactor the auth hook" }
-{ "type": "steer",            "text": "Focus on the tests first" }
-{ "type": "follow_up",        "text": "After that, run yarn type-check" }
-{ "type": "abort" }
-{ "type": "confirm_response", "id": "uuid", "confirmed": true }
+{ "type": "prompt",              "id": "...", "message": "Refactor the auth hook", "streamingBehavior": "steer" }
+{ "type": "steer",               "id": "...", "message": "Focus on the tests first" }
+{ "type": "follow_up",           "id": "...", "message": "After that, run yarn type-check" }
+{ "type": "abort",               "id": "..." }
+{ "type": "set_model",           "id": "...", "provider": "anthropic", "modelId": "claude-opus-4-5" }
+{ "type": "set_thinking_level",  "id": "...", "level": "medium" }
+{ "type": "get_state",           "id": "..." }
+{ "type": "get_messages",        "id": "..." }
+{ "type": "get_commands",        "id": "..." }
+{ "type": "get_available_models","id": "..." }
+{ "type": "extension_ui_response", "id": "uuid", ... }
 ```
+
+See the pi RPC documentation for the full protocol reference.
 
 ## File structure
 
 ```
 pi-remote/
-├── bridge.ts          # Bun server: pi SDK + WebSocket bridge + terminal logging
+├── bridge.ts          # Bun server: spawns pi --mode rpc, WebSocket bridge, terminal input
+├── prefs.json         # Persisted model + thinking-level preferences (auto-created)
 ├── public/
 │   ├── index.html     # Phone UI shell
 │   ├── style.css      # Dark mobile-first styles + markdown rendering styles
-│   └── client.js      # WebSocket client, event rendering, marked.js integration
+│   ├── client.js      # WebSocket client, event rendering, marked.js integration
+│   ├── manifest.json  # PWA manifest for home-screen install
+│   ├── sw.js          # Service worker
+│   └── icon.svg       # App icon
 ├── package.json
 ├── PROJECT_PLAN.md    # Architecture notes and roadmap
 └── README.md
@@ -147,11 +168,11 @@ pi-remote/
 
 | Package | Purpose |
 |---------|---------|
-| `@mariozechner/pi-coding-agent` | pi SDK — agent session, events, tools |
+| `pi` CLI (`@mariozechner/pi-coding-agent`) | Spawned as `pi --mode rpc`; bridge communicates via JSONL stdin/stdout |
 | [marked](https://marked.js.org/) (CDN) | Markdown rendering in the phone UI |
 | [Tailscale](https://tailscale.com) | Secure tunnel from phone to laptop |
 
 ## References
 
-- Pi SDK docs: `~/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/docs/sdk.md`
+- Pi RPC docs: `~/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/docs/sdk.md`
 - Tailscale: https://tailscale.com
