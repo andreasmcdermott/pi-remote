@@ -841,13 +841,26 @@ function extractUserText(content) {
       .join("");
   }
   
-  // Strip out skill and prompt template expansion blocks
-  // Keep everything before/after the XML blocks (original command and any additional text)
-  // These are added by pi when expanding /skill:name or /prompt:name
+  // Extract skill/prompt names if present and reconstruct the original command
+  const skillMatch = text.match(/<skill\s+name="([^"]+)"/);
+  if (skillMatch) {
+    const skillName = skillMatch[1];
+    // Extract any args that come after the skill block (e.g., PR ID)
+    const argsAfter = text.replace(/<skill[^>]*>[\s\S]*?<\/skill>/g, "").trim();
+    return `/skill:${skillName}${argsAfter ? " " + argsAfter : ""}`;
+  }
+  
+  const promptMatch = text.match(/<prompt\s+name="([^"]+)"/);
+  if (promptMatch) {
+    const promptName = promptMatch[1];
+    // Extract any args that come after the prompt block
+    const argsAfter = text.replace(/<prompt[^>]*>[\s\S]*?<\/prompt>/g, "").trim();
+    return `/prompt:${promptName}${argsAfter ? " " + argsAfter : ""}`;
+  }
+  
+  // If no skill/prompt blocks, just clean up and return
   text = text.replace(/<skill[^>]*>[\s\S]*?<\/skill>/g, "");
   text = text.replace(/<prompt[^>]*>[\s\S]*?<\/prompt>/g, "");
-  
-  // Clean up extra whitespace (multiple spaces/newlines)
   text = text.replace(/\s+/g, " ").trim();
   
   return text;
