@@ -830,14 +830,27 @@ function renderHistory(messages) {
 }
 
 function extractUserText(content) {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
+  let text = "";
+  
+  if (typeof content === "string") {
+    text = content;
+  } else if (Array.isArray(content)) {
+    text = content
       .filter(c => c.type === "text")
       .map(c => c.text)
       .join("");
   }
-  return "";
+  
+  // Strip out skill and prompt template expansion blocks
+  // Keep everything before/after the XML blocks (original command and any additional text)
+  // These are added by pi when expanding /skill:name or /prompt:name
+  text = text.replace(/<skill[^>]*>[\s\S]*?<\/skill>/g, "");
+  text = text.replace(/<prompt[^>]*>[\s\S]*?<\/prompt>/g, "");
+  
+  // Clean up extra whitespace (multiple spaces/newlines)
+  text = text.replace(/\s+/g, " ").trim();
+  
+  return text;
 }
 
 function extractUserImages(content) {
