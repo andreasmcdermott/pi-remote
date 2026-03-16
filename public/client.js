@@ -1514,9 +1514,12 @@ msgInput.addEventListener("keydown", (e) => {
       const sel = cmdList.querySelector(".cmd-item.selected");
       if (sel) {
         const idx = parseInt(sel.dataset.idx);
+        // Use same filter as showCmdPicker to ensure consistency
+        const search = cmdFilterText.toLowerCase();
         const matches = availableCommands.filter(c =>
-          c.name.toLowerCase().includes(cmdFilterText.toLowerCase())
-        );
+          c.name.toLowerCase().includes(search) ||
+          (c.description ?? "").toLowerCase().includes(search)
+        ).slice(0, 12);
         if (matches[idx]) selectCommand(matches[idx].name);
       }
       return;
