@@ -276,6 +276,67 @@ function listSessionFiles(): Array<{ path: string; name: string; mtime: number }
   }
 }
 
+// File listing for autocomplete (cache with short TTL)
+let fileListCache: string[] = [];
+let fileListCacheTime = 0;
+const FILE_LIST_CACHE_TTL = 5000; // 5 seconds
+
+const IGNORED_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".next",
+  "dist",
+  "build",
+  ".venv",
+  "__pycache__",
+  ".vscode",
+  ".idea",
+  ".DS_Store",
+  "target",
+  "coverage",
+  "out",
+  ".turbo",
+  ".clj-kondo",
+]);
+
+const IGNORED_FILES = new Set([
+  ".DS_Store",
+  ".gitkeep",
+  "thumbs.db",
+]);
+
+function listFilesRecursive(dir: string, prefix: string = ""): string[] {
+  const files: string[] = [];
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (IGNORED_DIRS.has(entry.name) || IGNORED_FILES.has(entry.name)) continue;
+
+      const fullPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        files.push(...listFilesRecursive(join(dir, entry.name), fullPath));
+      } else if (!entry.name.startsWith(".")) {
+        files.push(fullPath);
+      }
+    }
+  } catch {
+    // Ignore permission errors
+  }
+  return files;
+}
+
+function getFileList(forceRefresh = false): string[] {
+  const now = Date.now();
+  if (!forceRefresh && fileListCache.length > 0 && now - fileListCacheTime < FILE_LIST_CACHE_TTL) {
+    return fileListCache;
+  }
+
+  const files = listFilesRecursive(CWD).sort();
+  fileListCache = files;
+  fileListCacheTime = now;
+  return files;
+}
+
 function handleClientMessage(ws: any, raw: string): void {
   let cmd: any;
   try {
@@ -289,6 +350,13 @@ function handleClientMessage(ws: any, raw: string): void {
   if (cmd.type === "list_sessions") {
     const sessions = listSessionFiles();
     sendToWs(ws, JSON.stringify({ type: "response", command: "list_sessions", success: true, id: cmd.id, data: { sessions } }));
+    return;
+  }
+
+  // list_files: handled bridge-side (file listing for autocomplete)
+  if (cmd.type === "list_files") {
+    const files = getFileList(cmd.forceRefresh ?? false);
+    sendToWs(ws, JSON.stringify({ type: "response", command: "list_files", success: true, id: cmd.id, data: { files } }));
     return;
   }
 

@@ -114,6 +114,223 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden && unreadFinished) clearUnread();
 });
 
+// ─── File reference autocomplete ───────────────────────────────────────────────
+
+const autocompleteEl = document.getElementById("file-autocomplete");
+const msgInputEl = document.getElementById("msg-input");
+
+let fileList = [];
+let autocompleteState = {
+  visible: false,
+  query: "",
+  suggestions: [],
+  selectedIdx: 0,
+  atPos: 0, // character position of @ in the input
+};
+
+// Fuzzy score algorithm (Sublime Text style)
+function fuzzyScore(query, str) {
+  if (!query) return 1000; // Exact match, highest score
+  const q = query.toLowerCase();
+  const s = str.toLowerCase();
+  let score = 0;
+  let queryIdx = 0;
+  let prevMatchIdx = -1;
+
+  for (let i = 0; i < s.length && queryIdx < q.length; i++) {
+    if (s[i] === q[queryIdx]) {
+      // Consecutive character bonus
+      const consecutiveBonus = prevMatchIdx === i - 1 ? 10 : 0;
+      // Word boundary bonus (match after /)
+      const wordBoundaryBonus = i === 0 || s[i - 1] === "/" ? 50 : 0;
+      // Closer to start bonus
+      const posBonus = Math.max(0, 100 - i);
+      score += 100 + consecutiveBonus + wordBoundaryBonus + posBonus;
+      prevMatchIdx = i;
+      queryIdx++;
+    }
+  }
+
+  return queryIdx === q.length ? score : 0;
+}
+
+function loadFileList() {
+  if (fileList.length === 0) {
+    sendWithId({ type: "list_files", id: nextId() });
+  }
+}
+
+function updateAutocompleteSuggestions(query) {
+  if (!query) {
+    autocompleteState.suggestions = fileList.slice(0, 15);
+  } else {
+    const scored = fileList.map(file => ({
+      file,
+      score: fuzzyScore(query, file),
+    }));
+    autocompleteState.suggestions = scored
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 15)
+      .map(item => item.file);
+  }
+  autocompleteState.selectedIdx = 0;
+  renderAutocomplete();
+}
+
+// Re-render without changing selectedIdx (for keyboard navigation)
+function rerenderAutocomplete() {
+  renderAutocomplete();
+}
+
+function renderAutocomplete() {
+  if (!autocompleteEl) return;
+  
+  autocompleteEl.innerHTML = "";
+  const suggestions = autocompleteState.suggestions;
+
+  if (suggestions.length === 0) {
+    hideAutocomplete();
+    return;
+  }
+
+  let focusedItem = null;
+  for (let i = 0; i < suggestions.length; i++) {
+    const item = document.createElement("div");
+    item.className = `file-autocomplete-item ${i === autocompleteState.selectedIdx ? "focused" : ""}`;
+    item.textContent = suggestions[i];
+    item.addEventListener("click", () => selectAutocompleteSuggestion(i));
+    item.addEventListener("mouseover", () => {
+      document.querySelectorAll(".file-autocomplete-item").forEach(el => el.classList.remove("focused"));
+      item.classList.add("focused");
+      autocompleteState.selectedIdx = i;
+    });
+    autocompleteEl.appendChild(item);
+    
+    // Keep reference to focused item for scrolling
+    if (i === autocompleteState.selectedIdx) {
+      focusedItem = item;
+    }
+  }
+
+  // Position the popup above the input
+  if (msgInputEl) {
+    const inputRect = msgInputEl.getBoundingClientRect();
+    autocompleteEl.style.bottom = (window.innerHeight - inputRect.top + 4) + "px";
+  }
+  autocompleteEl.style.left = "12px";
+  autocompleteEl.style.right = "12px";
+  autocompleteEl.style.maxWidth = "none";
+
+  autocompleteEl.classList.add("visible");
+  autocompleteState.visible = true;
+  
+  // Scroll focused item into view
+  if (focusedItem) {
+    focusedItem.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
+
+function hideAutocomplete() {
+  if (!autocompleteEl) return;
+  autocompleteEl.classList.remove("visible");
+  autocompleteEl.innerHTML = "";
+  autocompleteState.visible = false;
+  autocompleteState.suggestions = [];
+}
+
+function selectAutocompleteSuggestion(idx) {
+  const suggestion = autocompleteState.suggestions[idx];
+  if (!suggestion || !msgInputEl) return;
+
+  const text = msgInputEl.value;
+  const before = text.substring(0, autocompleteState.atPos) + "@" + suggestion;
+  const after = text.substring(msgInputEl.selectionStart);
+  
+  msgInputEl.value = before + after;
+  msgInputEl.focus();
+  msgInputEl.selectionStart = msgInputEl.selectionEnd = before.length;
+  
+  hideAutocomplete();
+  msgInputEl.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+// Listen for @ in the input
+if (msgInputEl) {
+  msgInputEl.addEventListener("input", (e) => {
+    const text = msgInputEl.value;
+    const cursorPos = msgInputEl.selectionStart;
+
+    // Find the last @ before cursor
+    let atIdx = -1;
+    for (let i = cursorPos - 1; i >= 0; i--) {
+      if (text[i] === "@") {
+        atIdx = i;
+        break;
+      } else if (text[i] === " " || text[i] === "\n") {
+        // Stop at whitespace
+        break;
+      }
+    }
+
+    if (atIdx === -1) {
+      hideAutocomplete();
+      return;
+    }
+
+    // Get text after @
+    const query = text.substring(atIdx + 1, cursorPos);
+
+    // Only show autocomplete for printable characters after @
+    if (!/^[a-zA-Z0-9._/-]*$/.test(query)) {
+      hideAutocomplete();
+      return;
+    }
+
+    autocompleteState.atPos = atIdx;
+    autocompleteState.query = query;
+    
+    if (fileList.length === 0) {
+      loadFileList();
+    } else {
+      updateAutocompleteSuggestions(query);
+    }
+  });
+
+  // Keyboard navigation in autocomplete
+  msgInputEl.addEventListener("keydown", (e) => {
+    if (!autocompleteState.visible) return;
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      autocompleteState.selectedIdx = Math.max(0, autocompleteState.selectedIdx - 1);
+      rerenderAutocomplete();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      autocompleteState.selectedIdx = Math.min(
+        autocompleteState.suggestions.length - 1,
+        autocompleteState.selectedIdx + 1
+      );
+      rerenderAutocomplete();
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      selectAutocompleteSuggestion(autocompleteState.selectedIdx);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      hideAutocomplete();
+    }
+  });
+}
+
+// Load file list on first connection
+function onConnected() {
+  loadFileList();
+}
+
 // ─── WebSocket ───────────────────────────────────────────────────────────────
 
 function nextId() { return `client-${++reqCounter}`; }
@@ -126,6 +343,7 @@ function connect() {
     isConnected = true;
     reconnectDelay = 1000;
     setConnectionStatus("connected");
+    onConnected();
     // Restore saved thinking level
     if (currentThinkingLevel !== "none") {
       sendWithId({ type: "set_thinking_level", level: currentThinkingLevel });
@@ -294,6 +512,13 @@ function handleResponse(msg) {
 
     case "get_commands":
       availableCommands = msg.data.commands ?? [];
+      break;
+
+    case "list_files":
+      fileList = msg.data.files ?? [];
+      if (autocompleteState.visible) {
+        updateAutocompleteSuggestions(autocompleteState.query);
+      }
       break;
 
     case "get_available_models":

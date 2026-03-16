@@ -445,6 +445,59 @@ body {
 }
 .tool-output.error { color: var(--red); }
 
+/* ── File reference autocomplete ─────────────────────── */
+
+#file-autocomplete {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 150;
+  max-height: 200px;
+  overflow-y: auto;
+  display: none;
+  flex-direction: column;
+  -webkit-overflow-scrolling: touch;
+}
+
+#file-autocomplete.visible {
+  display: flex;
+}
+
+.file-autocomplete-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.file-autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.file-autocomplete-item:hover,
+.file-autocomplete-item.focused {
+  background: var(--surface2);
+  color: var(--accent);
+}
+
+.file-autocomplete-item-match {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ── Slash command picker ────────────────────────────── */
 
 #cmd-picker {

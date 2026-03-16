@@ -86,6 +86,7 @@ You can type messages directly in the terminal — no need to open the web UI wh
 | Abort button | Stops the current operation |
 | Conversation history | Bootstrapped from pi on connect / reconnect |
 | Auto-reconnect | Exponential back-off — survives brief network blips |
+| **File reference autocomplete** | Type `@` to fuzzy-search & autocomplete project files (like TUI) |
 | Extension UI dialogs | `extension_ui_request` round-trips: first client to respond wins; auto-deny on timeout |
 | Model picker | Lists available models; recently-used models are persisted in `prefs.json` |
 | Thinking level | Persisted across restarts |
@@ -150,17 +151,20 @@ See the pi RPC documentation for the full protocol reference.
 
 ```
 pi-remote/
-├── bridge.ts          # Bun server: spawns pi --mode rpc, WebSocket bridge, terminal input
-├── prefs.json         # Persisted model + thinking-level preferences (auto-created)
+├── bridge.ts                        # Bun server: spawns pi --mode rpc, WebSocket bridge, file listing
+├── prefs.json                       # Persisted model + thinking-level preferences (auto-created)
 ├── public/
-│   ├── index.html     # Phone UI shell
-│   ├── style.css      # Dark mobile-first styles + markdown rendering styles
-│   ├── client.js      # WebSocket client, event rendering, marked.js integration
-│   ├── manifest.json  # PWA manifest for home-screen install
-│   ├── sw.js          # Service worker
-│   └── icon.svg       # App icon
+│   ├── index.html                   # Phone UI shell
+│   ├── style.css                    # Dark mobile-first styles + markdown + autocomplete styles
+│   ├── client.js                    # WebSocket client, event rendering, autocomplete logic
+│   ├── manifest.json                # PWA manifest for home-screen install
+│   ├── sw.js                        # Service worker
+│   └── icon.svg                     # App icon
 ├── package.json
-├── PROJECT_PLAN.md    # Architecture notes and roadmap
+├── PROJECT_PLAN.md                  # Architecture notes and roadmap
+├── AUTOCOMPLETE.md                  # File reference autocomplete feature guide
+├── IMPLEMENTATION_SUMMARY.md        # Technical implementation details
+├── AUTOCOMPLETE_QUICK_REF.md        # Quick reference for developers
 └── README.md
 ```
 
@@ -172,7 +176,28 @@ pi-remote/
 | [marked](https://marked.js.org/) (CDN) | Markdown rendering in the phone UI |
 | [Tailscale](https://tailscale.com) | Secure tunnel from phone to laptop |
 
+## File reference autocomplete
+
+Type `@` in the message input to fuzzy-search project files:
+
+```
+Type:   "Fix the bug in @src"
+Shows:  src/main.ts, src/index.ts, src/utils/...
+Select: @src/main.ts (with ↑↓ arrow keys or mouse)
+```
+
+Features:
+- **Fuzzy matching** - Type partial paths, matches expand (e.g., `@s/m` → `src/main.ts`)
+- **Smart ignore** - Excludes `node_modules`, `.git`, `dist`, build directories
+- **Keyboard navigation** - ↑↓ to select, Enter/Tab to insert, Escape to dismiss
+- **Cached** - 5-second TTL prevents excessive filesystem scans
+- **Mobile-friendly** - Popup positioned above input, touch-optimized
+
+See [AUTOCOMPLETE.md](AUTOCOMPLETE.md) for full documentation and [AUTOCOMPLETE_QUICK_REF.md](AUTOCOMPLETE_QUICK_REF.md) for developer reference.
+
 ## References
 
 - Pi RPC docs: `~/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/docs/sdk.md`
 - Tailscale: https://tailscale.com
+- File autocomplete guide: [AUTOCOMPLETE.md](AUTOCOMPLETE.md)
+- Implementation details: [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)
