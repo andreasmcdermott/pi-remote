@@ -244,8 +244,8 @@ function selectAutocompleteSuggestion(idx) {
   if (!suggestion || !msgInputEl) return;
 
   const text = msgInputEl.value;
-  // Replace @ and query with just the suggestion (no @ prefix to avoid re-triggering on backspace)
-  const before = text.substring(0, autocompleteState.atPos) + suggestion;
+  // Replace @ and query with suggestion + space (no @ prefix to avoid re-triggering on backspace)
+  const before = text.substring(0, autocompleteState.atPos) + suggestion + " ";
   const after = text.substring(msgInputEl.selectionStart);
   
   msgInputEl.value = before + after;
@@ -275,6 +275,15 @@ if (msgInputEl) {
     }
 
     if (atIdx === -1) {
+      hideAutocomplete();
+      return;
+    }
+
+    // Only trigger if @ is preceded by whitespace/newline or is first character
+    const charBeforeAt = atIdx > 0 ? text[atIdx - 1] : null;
+    const isValidPosition = atIdx === 0 || charBeforeAt === " " || charBeforeAt === "\n";
+    
+    if (!isValidPosition) {
       hideAutocomplete();
       return;
     }
