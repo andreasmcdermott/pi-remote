@@ -192,6 +192,12 @@ body {
   white-space: nowrap;
 }
 
+@media (max-width: 600px) {
+  #session-stats {
+    display: none;
+  }
+}
+
 /* #export-btn and #compact-btn now use .header-action-btn */
 
 #abort-btn {
