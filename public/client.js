@@ -1409,6 +1409,15 @@ function sendMessage() {
   if (!text || !isConnected) return;
   hideCmdPicker();
 
+  // Handle /new command to start a new session
+  if (text === "/new" || text.startsWith("/new ")) {
+    sendWithId({ type: "new_session" });
+    msgInput.value = "";
+    msgInput.style.height = "auto";
+    updateSendButton();
+    return;
+  }
+
   const mode = getMode();
   const images = pendingImages.length > 0
     ? pendingImages.map(({ type, data, mimeType }) => ({ type, data, mimeType }))
