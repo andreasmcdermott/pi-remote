@@ -306,7 +306,7 @@ const IGNORED_FILES = new Set([
 ]);
 
 function listFilesRecursive(dir: string, prefix: string = ""): string[] {
-  const files: string[] = [];
+  const items: string[] = [];
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
@@ -314,15 +314,18 @@ function listFilesRecursive(dir: string, prefix: string = ""): string[] {
 
       const fullPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
-        files.push(...listFilesRecursive(join(dir, entry.name), fullPath));
+        // Include directory itself as an option (with trailing /)
+        items.push(fullPath + "/");
+        // Recursively add files from inside the directory
+        items.push(...listFilesRecursive(join(dir, entry.name), fullPath));
       } else if (!entry.name.startsWith(".")) {
-        files.push(fullPath);
+        items.push(fullPath);
       }
     }
   } catch {
     // Ignore permission errors
   }
-  return files;
+  return items;
 }
 
 function getFileList(forceRefresh = false): string[] {

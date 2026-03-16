@@ -244,7 +244,8 @@ function selectAutocompleteSuggestion(idx) {
   if (!suggestion || !msgInputEl) return;
 
   const text = msgInputEl.value;
-  const before = text.substring(0, autocompleteState.atPos) + "@" + suggestion;
+  // Replace @ and query with just the suggestion (no @ prefix to avoid re-triggering on backspace)
+  const before = text.substring(0, autocompleteState.atPos) + suggestion;
   const after = text.substring(msgInputEl.selectionStart);
   
   msgInputEl.value = before + after;
