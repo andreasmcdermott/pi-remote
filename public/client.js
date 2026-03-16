@@ -19,6 +19,7 @@ const newSessionBtn  = document.getElementById("new-session-btn");
 const modelBtn       = document.getElementById("model-btn");
 const modelPanel     = document.getElementById("model-panel");
 const modelList      = document.getElementById("model-list");
+const sessionInfo    = document.getElementById("session-info");
 const sessionStats   = document.getElementById("session-stats");
 const forkBtn        = document.getElementById("fork-btn");
 const exportBtn      = document.getElementById("export-btn");
@@ -424,6 +425,15 @@ function handleMessage(msg) {
   if (msg.type === "prefs") {
     recentModels = msg.recentModels ?? [];
     renderModelPanel();
+    return;
+  }
+
+  // Session info (folder + branch)
+  if (msg.type === "session_info") {
+    if (sessionInfo) {
+      sessionInfo.textContent = `${msg.folder} • ${msg.branch}`;
+      sessionInfo.title = `Folder: ${msg.folder}\nBranch: ${msg.branch}`;
+    }
     return;
   }
 

@@ -186,6 +186,14 @@ body {
   background: rgba(255,255,255,0.05);
 }
 
+#session-info {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  padding: 0 12px;
+  border-right: 1px solid var(--border);
+}
+
 #session-stats {
   font-size: 11px;
   color: var(--text-dim);
@@ -193,6 +201,9 @@ body {
 }
 
 @media (max-width: 600px) {
+  #session-info {
+    display: none;
+  }
   #session-stats {
     display: none;
   }

@@ -21,6 +21,7 @@ import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { StringDecoder } from "string_decoder";
 import { createInterface } from "readline";
+import { execSync } from "child_process";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -343,6 +344,17 @@ function getFileList(forceRefresh = false): string[] {
   return files;
 }
 
+function getSessionInfo() {
+  const folder = CWD.split("/").pop() || CWD;
+  let branch = "?";
+  try {
+    branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: CWD, encoding: "utf-8" }).trim();
+  } catch {
+    // Not a git repo or git not available
+  }
+  return { folder, branch };
+}
+
 function handleClientMessage(ws: any, raw: string): void {
   let cmd: any;
   try {
@@ -419,6 +431,10 @@ function bootstrapClient(ws: any): void {
 
   // Send current prefs immediately (no round-trip needed)
   sendToWs(ws, prefsMessage());
+  
+  // Send session info (folder + branch)
+  const sessionInfo = getSessionInfo();
+  sendToWs(ws, JSON.stringify({ type: "session_info", folder: sessionInfo.folder, branch: sessionInfo.branch }));
 
   sendToPi({ type: "get_state", id: stateId });
   sendToPi({ type: "get_messages", id: messagesId });
