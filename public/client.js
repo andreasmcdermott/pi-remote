@@ -1057,13 +1057,14 @@ function createThinkingBlock(content, isStreaming) {
   toggle.setAttribute("aria-expanded", "false");
 
   const pre = document.createElement("pre");
+  // Always start collapsed (hidden) - both streaming and historical views match
   pre.className = "thinking-content hidden";
   pre.textContent = content;
 
   toggle.addEventListener("click", () => {
-    const expanded = pre.classList.toggle("hidden");
-    toggle.setAttribute("aria-expanded", String(!expanded));
-    toggle.textContent = expanded ? "💭 Thinking…" : "💭 Thinking (hide)";
+    const isNowHidden = pre.classList.toggle("hidden");
+    toggle.setAttribute("aria-expanded", String(!isNowHidden));
+    toggle.textContent = isNowHidden ? "💭 Thinking…" : "💭 Thinking (hide)";
   });
 
   wrapper.appendChild(toggle);
