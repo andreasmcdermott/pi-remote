@@ -217,10 +217,13 @@ attachJsonlReader(pi.stdout as ReadableStream<Uint8Array>, (line) => {
       broadcast(prefsMessage());
     }
 
+    // Broadcast new_session and switch_session to all clients so they all refresh
+    const shouldBroadcast = parsed.command === "new_session" || parsed.command === "switch_session";
+    
     const target = pendingResponseRoutes.get(parsed.id);
     if (target !== undefined) {
       pendingResponseRoutes.delete(parsed.id);
-      if (target === null) {
+      if (target === null || shouldBroadcast) {
         broadcast(line);
       } else {
         sendToWs(target, line);
