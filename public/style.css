@@ -1305,5 +1305,23 @@ textarea#msg-input:focus { border-color: var(--accent); }
   50%       { opacity: 0.3; transform: scale(0.6); }
 }
 
+/* ── Drag and drop ───────────────────────────────────── */
+
+body.drag-over {
+  background: rgba(124, 106, 247, 0.15);
+  transition: background 0.2s ease;
+}
+
+body.drag-over #input-area {
+  border: 2px solid var(--accent);
+  background: rgba(124, 106, 247, 0.1);
+}
+
+body.drag-over #attach-btn {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(124, 106, 247, 0.15);
+}
+
 /* ── Utility ─────────────────────────────────────────── */
 .hidden { display: none !important; }

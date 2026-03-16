@@ -1711,6 +1711,50 @@ document.addEventListener("paste", async (e) => {
   msgInput.focus();
 });
 
+// Drag and drop support
+let dragCounter = 0; // Track nested drag events
+
+document.addEventListener("dragenter", (e) => {
+  dragCounter++;
+  const items = [...(e.dataTransfer?.items ?? [])];
+  const hasImages = items.some(it => it.kind === "file" && it.type.startsWith("image/"));
+  if (hasImages) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    document.body.classList.add("drag-over");
+  }
+});
+
+document.addEventListener("dragleave", (e) => {
+  dragCounter--;
+  if (dragCounter === 0) {
+    document.body.classList.remove("drag-over");
+  }
+});
+
+document.addEventListener("dragover", (e) => {
+  const items = [...(e.dataTransfer?.items ?? [])];
+  const hasImages = items.some(it => it.kind === "file" && it.type.startsWith("image/"));
+  if (hasImages) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+});
+
+document.addEventListener("drop", async (e) => {
+  dragCounter = 0;
+  document.body.classList.remove("drag-over");
+  
+  const items = [...(e.dataTransfer?.items ?? [])];
+  const imageItems = items.filter(it => it.kind === "file" && it.type.startsWith("image/"));
+  if (imageItems.length === 0) return;
+  
+  e.preventDefault();
+  const files = imageItems.map(it => it.getAsFile()).filter(Boolean);
+  await addImages(files);
+  msgInput.focus();
+});
+
 // ─── Conversation forking ─────────────────────────────────────────────────────
 
 let forkMessages = []; // [{entryId, text}]
