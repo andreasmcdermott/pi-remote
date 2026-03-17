@@ -227,6 +227,53 @@ body {
 
 /* ── Conversation ────────────────────────────────────── */
 
+#subagent-monitor {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 12px;
+}
+
+#subagent-monitor-toggle {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+#subagent-monitor-body {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 170px;
+  overflow-y: auto;
+}
+
+.subagent-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #141414;
+}
+
+.subagent-main {
+  font-size: 12px;
+}
+
+.subagent-task,
+.subagent-output {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 #conversation {
   flex: 1;
   overflow-y: auto;
@@ -1308,19 +1355,27 @@ textarea#msg-input:focus { border-color: var(--accent); }
 /* ── Drag and drop ───────────────────────────────────── */
 
 body.drag-over {
-  background: rgba(124, 106, 247, 0.15);
-  transition: background 0.2s ease;
+  background: var(--surface);
+}
+
+body.drag-over::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.38);
+  pointer-events: none;
+  z-index: 1;
 }
 
 body.drag-over #input-area {
-  border: 2px solid var(--accent);
-  background: rgba(124, 106, 247, 0.1);
+  border-top-color: rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.35);
 }
 
 body.drag-over #attach-btn {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: rgba(124, 106, 247, 0.15);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* ── Utility ─────────────────────────────────────────── */
