@@ -138,9 +138,13 @@
 
   <script src="client.js"></script>
   <script>
-    // Unregister any previously installed service worker (removed: was causing stale cache issues)
+    // Register service worker for PWA/offline behavior.
+    // Note: this alone does not enable lock-screen push notifications;
+    // push still requires server-side Web Push plumbing.
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
     }
   </script>
 </body>

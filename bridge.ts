@@ -16,6 +16,7 @@
  */
 
 import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";
+import webpush from "web-push";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
@@ -50,7 +51,13 @@ interface Prefs {
   lastThinkingLevel?: string;
 }
 
+interface PushPrefs {
+  vapidKeys?: { publicKey: string; privateKey: string };
+  subscriptions?: any[];
+}
+
 const PREFS_PATH = join(__dirname, "prefs.json");
+const PUSH_PREFS_PATH = join(__dirname, "push-prefs.json");
 
 function loadPrefs(): Prefs {
   try { return JSON.parse(readFileSync(PREFS_PATH, "utf8")); }
@@ -63,6 +70,99 @@ function savePrefs(prefs: Prefs): void {
 }
 
 const prefs = loadPrefs();
+
+function loadPushPrefs(): PushPrefs {
+  try { return JSON.parse(readFileSync(PUSH_PREFS_PATH, "utf8")); }
+  catch { return {}; }
+}
+
+function savePushPrefs(data: PushPrefs): void {
+  try { writeFileSync(PUSH_PREFS_PATH, JSON.stringify(data, null, 2)); }
+  catch (e) { console.error("[bridge] failed to save push prefs:", e); }
+}
+
+const pushPrefs = loadPushPrefs();
+if (!pushPrefs.vapidKeys) {
+  pushPrefs.vapidKeys = webpush.generateVAPIDKeys();
+  savePushPrefs(pushPrefs);
+}
+if (!Array.isArray(pushPrefs.subscriptions)) {
+  pushPrefs.subscriptions = [];
+  savePushPrefs(pushPrefs);
+}
+
+webpush.setVapidDetails(
+  process.env.WEB_PUSH_CONTACT ?? "mailto:pi-remote@localhost",
+  pushPrefs.vapidKeys.publicKey,
+  pushPrefs.vapidKeys.privateKey,
+);
+
+function sameSubscription(a: any, b: any): boolean {
+  return !!a?.endpoint && !!b?.endpoint && a.endpoint === b.endpoint;
+}
+
+function addPushSubscription(sub: any): void {
+  if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) return;
+  const list = pushPrefs.subscriptions ?? [];
+  if (!list.some((existing) => sameSubscription(existing, sub))) {
+    list.push(sub);
+    pushPrefs.subscriptions = list;
+    savePushPrefs(pushPrefs);
+  }
+}
+
+function removePushSubscription(sub: any): void {
+  const list = pushPrefs.subscriptions ?? [];
+  const next = list.filter((existing) => !sameSubscription(existing, sub));
+  if (next.length !== list.length) {
+    pushPrefs.subscriptions = next;
+    savePushPrefs(pushPrefs);
+  }
+}
+
+async function notifyPushSubscribers(title: string, body: string): Promise<{ sent: number; failed: number; results: any[] }> {
+  const list = [...(pushPrefs.subscriptions ?? [])];
+  if (list.length === 0) return { sent: 0, failed: 0, results: [] };
+
+  const payload = JSON.stringify({ title, body, tag: "pi-remote-agent-finished" });
+  let sent = 0;
+  let failed = 0;
+  const results: any[] = [];
+
+  await Promise.all(list.map(async (sub, idx) => {
+    const endpoint = String(sub?.endpoint ?? "");
+    let host = "unknown";
+    try { host = new URL(endpoint).host; } catch {}
+
+    try {
+      const resp = await webpush.sendNotification(sub, payload);
+      sent += 1;
+      const statusCode = Number((resp as any)?.statusCode ?? 0);
+      results.push({ idx, ok: true, host, statusCode });
+      console.log(`[bridge] web-push sent ok idx=${idx} host=${host} status=${statusCode || "?"}`);
+    } catch (err: any) {
+      failed += 1;
+      const statusCode = Number(err?.statusCode ?? 0);
+      const bodyText = String(err?.body ?? err?.message ?? err);
+
+      // Remove subscriptions that are definitely stale/invalid for future sends.
+      const shouldRemove =
+        statusCode === 404 ||
+        statusCode === 410 ||
+        (statusCode === 400 && bodyText.includes("VapidPkHashMismatch")) ||
+        (statusCode === 403 && bodyText.includes("BadJwtToken"));
+
+      if (shouldRemove) removePushSubscription(sub);
+
+      results.push({ idx, ok: false, host, statusCode, error: bodyText });
+      console.error(`[bridge] web-push send failed idx=${idx} host=${host} status=${statusCode || "?"} error=${bodyText}`);
+    }
+  }));
+
+  return { sent, failed, results };
+}
+
+console.log(`[bridge] Web Push ready (subscriptions=${pushPrefs.subscriptions.length})`);
 
 // ---------------------------------------------------------------------------
 // Spawn pi --mode rpc
@@ -218,6 +318,12 @@ attachJsonlReader(pi.stdout as ReadableStream<Uint8Array>, (line) => {
     parsed.type === "agent_end"
   ) {
     console.log(`[pi] ${JSON.stringify(parsed)}`);
+  }
+
+  if (parsed.type === "agent_end") {
+    notifyPushSubscribers("pi remote", "LLM finished working.").catch((e) => {
+      console.error("[bridge] failed to send push notifications:", e);
+    });
   }
 
   // Route: responses with id → specific client or broadcast; events → broadcast
@@ -518,6 +624,40 @@ const server = Bun.serve({
       const ok = server.upgrade(req);
       if (!ok) return new Response("WebSocket upgrade failed", { status: 400 });
       return undefined as any;
+    }
+
+    if (url.pathname === "/api/push/public-key" && req.method === "GET") {
+      return Response.json({ publicKey: pushPrefs.vapidKeys?.publicKey ?? "" });
+    }
+
+    if (url.pathname === "/api/push/subscribe" && req.method === "POST") {
+      return req.json().then((body: any) => {
+        addPushSubscription(body?.subscription);
+        return Response.json({ ok: true, count: pushPrefs.subscriptions?.length ?? 0 });
+      }).catch(() => new Response("Invalid JSON", { status: 400 }));
+    }
+
+    if (url.pathname === "/api/push/unsubscribe" && req.method === "POST") {
+      return req.json().then((body: any) => {
+        removePushSubscription(body?.subscription);
+        return Response.json({ ok: true, count: pushPrefs.subscriptions?.length ?? 0 });
+      }).catch(() => new Response("Invalid JSON", { status: 400 }));
+    }
+
+    if (url.pathname === "/api/push/test" && req.method === "POST") {
+      return req.json().catch(() => ({})).then(async (body: any) => {
+        const title = body?.title ?? "pi remote";
+        const message = body?.body ?? "Test push notification from bridge.";
+        const report = await notifyPushSubscribers(title, message);
+        return Response.json({ ok: true, count: pushPrefs.subscriptions?.length ?? 0, report });
+      });
+    }
+
+    if (url.pathname === "/api/push/status" && req.method === "GET") {
+      return Response.json({
+        ok: true,
+        count: pushPrefs.subscriptions?.length ?? 0,
+      });
     }
 
     const pathname = url.pathname === "/" ? "/index.html" : url.pathname;

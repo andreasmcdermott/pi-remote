@@ -135,6 +135,81 @@ function notificationsSupported() {
   return typeof Notification !== "undefined";
 }
 
+function pushSupported() {
+  return (
+    typeof window !== "undefined" &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window
+  );
+}
+
+function base64UrlToUint8Array(base64Url) {
+  const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
+  const base64 = (base64Url + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+async function getSwRegistration() {
+  if (!pushSupported()) return null;
+  try {
+    return await navigator.serviceWorker.ready;
+  } catch {
+    return null;
+  }
+}
+
+async function getPushSubscription() {
+  const reg = await getSwRegistration();
+  if (!reg) return null;
+  try {
+    return await reg.pushManager.getSubscription();
+  } catch {
+    return null;
+  }
+}
+
+async function subscribeWebPush() {
+  if (!pushSupported()) return;
+  const reg = await getSwRegistration();
+  if (!reg) return;
+
+  const keyResp = await fetch("/api/push/public-key");
+  if (!keyResp.ok) throw new Error("Failed to fetch push public key");
+  const keyData = await keyResp.json();
+  if (!keyData.publicKey) throw new Error("Missing push public key");
+
+  let subscription = await reg.pushManager.getSubscription();
+  if (!subscription) {
+    subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: base64UrlToUint8Array(keyData.publicKey),
+    });
+  }
+
+  await fetch("/api/push/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subscription }),
+  });
+}
+
+async function unsubscribeWebPush() {
+  if (!pushSupported()) return;
+  const subscription = await getPushSubscription();
+  if (!subscription) return;
+
+  await fetch("/api/push/unsubscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subscription }),
+  }).catch(() => {});
+
+  try { await subscription.unsubscribe(); } catch {}
+}
+
 const NOTIFICATION_ICON_ON = '<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,71.1a8,8,0,0,1-10.78-3.42,94.13,94.13,0,0,0-33.46-36.91,8,8,0,1,1,8.54-13.54,111.46,111.46,0,0,1,39.12,43.09A8,8,0,0,1,224,71.1ZM35.71,72a8,8,0,0,0,7.1-4.32A94.13,94.13,0,0,1,76.27,30.77a8,8,0,1,0-8.54-13.54A111.46,111.46,0,0,0,28.61,60.32,8,8,0,0,0,35.71,72Zm186.1,103.94A16,16,0,0,1,208,200H167.2a40,40,0,0,1-78.4,0H48a16,16,0,0,1-13.79-24.06C43.22,160.39,48,138.28,48,112a80,80,0,0,1,160,0C208,138.27,212.78,160.38,221.81,175.94ZM150.62,200H105.38a24,24,0,0,0,45.24,0ZM208,184c-10.64-18.27-16-42.49-16-72a64,64,0,0,0-128,0c0,29.52-5.38,53.74-16,72Z"/></svg>';
 const NOTIFICATION_ICON_OFF = '<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M53.92,34.62A8,8,0,1,0,42.08,45.38L58.82,63.8A79.59,79.59,0,0,0,48,104c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.8a40,40,0,0,0,78.4,0h15.44l19.44,21.38a8,8,0,1,0,11.84-10.76ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a63.65,63.65,0,0,1,6.26-27.62L168.09,184Zm166-4.73a8.13,8.13,0,0,1-2.93.55,8,8,0,0,1-7.44-5.08C196.35,156.19,192,129.75,192,104A64,64,0,0,0,96.43,48.31a8,8,0,0,1-7.9-13.91A80,80,0,0,1,208,104c0,35.35,8.05,58.59,10.52,64.88A8,8,0,0,1,214,179.25Z"/></svg>';
 
@@ -182,6 +257,17 @@ async function toggleNotifications() {
     appendSystemNote("Notifications are blocked by the browser. Enable them in site settings.");
   } else {
     notificationsEnabled = !notificationsEnabled;
+  }
+
+  try {
+    if (notificationsEnabled && Notification.permission === "granted") {
+      await subscribeWebPush();
+    } else {
+      await unsubscribeWebPush();
+    }
+  } catch (e) {
+    notificationsEnabled = false;
+    appendErrorBubble(`Failed to configure push notifications: ${e?.message ?? e}`);
   }
 
   localStorage.setItem("notifications-enabled", String(notificationsEnabled));
@@ -2418,6 +2504,23 @@ conversation.addEventListener("scroll", () => {
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
+async function initializeNotifications() {
+  if (!notificationsEnabled) return;
+  if (!notificationsSupported()) return;
+  if (Notification.permission !== "granted") {
+    notificationsEnabled = false;
+    localStorage.setItem("notifications-enabled", "false");
+    return;
+  }
+
+  try {
+    await subscribeWebPush();
+  } catch (e) {
+    appendErrorBubble(`Push initialization failed: ${e?.message ?? e}`);
+  }
+}
+
 updateNotificationButtons();
+initializeNotifications();
 connect();
 msgInput.focus();

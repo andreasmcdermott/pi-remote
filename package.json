@@ -8,6 +8,7 @@
     "dev": "bun --watch bridge.ts"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "*"
+    "@mariozechner/pi-coding-agent": "*",
+    "web-push": "^3.6.7"
   }
 }
