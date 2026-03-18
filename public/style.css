@@ -533,12 +533,14 @@ body {
   font-size: 12px;
   line-height: 1.4;
   min-height: 28px;
-  display: flex;
-  align-items: center;
+  display: block;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  direction: rtl;      /* keep filename/end of path visible */
+  text-align: left;
+  unicode-bidi: plaintext;
   -webkit-tap-highlight-color: transparent;
   flex-shrink: 0;
 }

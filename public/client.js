@@ -325,6 +325,11 @@ let autocompleteState = {
   atPos: 0, // character position of @ in the input
 };
 
+function basename(path) {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? path : path.slice(idx + 1);
+}
+
 // Fuzzy score algorithm (Sublime Text style)
 function fuzzyScore(query, str) {
   if (!query) return 1000; // Exact match, highest score
@@ -351,6 +356,86 @@ function fuzzyScore(query, str) {
   return queryIdx === q.length ? score : 0;
 }
 
+function fileMatchScore(query, file) {
+  if (!query) return 1000;
+
+  const queryHasUpper = /[A-Z]/.test(query);
+  const queryHasSlash = query.includes("/");
+
+  const qLower = query.toLowerCase();
+  const fullRaw = file;
+  const fullLower = fullRaw.toLowerCase();
+  const baseRaw = basename(file);
+  const baseLower = baseRaw.toLowerCase();
+
+  let score = 0;
+
+  // Filename-first ranking (dominant when query is just a filename fragment)
+  // Important: "exact" means case-sensitive exact.
+  const baseExactCase = baseRaw === query;
+  const baseExactInsensitive = baseLower === qLower;
+  const basePrefix = baseLower.startsWith(qLower);
+  const baseContains = baseLower.includes(qLower);
+
+  if (baseExactCase) score += 50000;
+  else if (baseExactInsensitive) score += 12000;
+  if (basePrefix) score += 25000;
+  if (baseContains) score += 9000;
+
+  // If query looks like a filename with extension prefix (e.g. "Icon.ts"),
+  // heavily prefer basenames that continue from that prefix (e.g. Icon.tsx).
+  if (!queryHasSlash && /\.[a-z0-9]+$/i.test(query) && basePrefix) {
+    score += 12000;
+  }
+
+  // Full-path relevance matters more only when user typed a slash.
+  if (queryHasSlash) {
+    if (fullRaw === query) score += 18000;
+    else if (fullLower === qLower) score += 6000;
+    if (fullLower.startsWith(qLower)) score += 10000;
+    if (fullLower.includes(qLower)) score += 5000;
+  } else {
+    if (fullRaw === query) score += 2500;
+    else if (fullLower === qLower) score += 900;
+    if (fullLower.startsWith(qLower)) score += 1200;
+    if (fullLower.includes(`/${qLower}`)) score += 900;
+    if (fullLower.includes(qLower)) score += 500;
+  }
+
+  // Case preference:
+  // - Uppercase in query => strongly prefer exact case matches
+  // - Lowercase query => slight preference for exact case
+  const baseCaseExact = baseRaw === query;
+  const baseCasePrefix = baseRaw.startsWith(query);
+  const baseCaseContains = baseRaw.includes(query);
+  const fullCaseExact = fullRaw === query;
+  const fullCasePrefix = fullRaw.startsWith(query);
+  const fullCaseContains = fullRaw.includes(query);
+
+  if (queryHasUpper) {
+    if (baseCaseExact) score += 30000;
+    if (baseCasePrefix) score += 14000;
+    if (baseCaseContains) score += 5000;
+    if (fullCaseExact) score += 6000;
+    if (fullCasePrefix) score += 2200;
+    if (fullCaseContains) score += 1000;
+  } else {
+    if (baseCaseExact) score += 1800;
+    if (baseCasePrefix) score += 1000;
+    if (baseCaseContains) score += 450;
+    if (fullCaseExact) score += 600;
+    if (fullCasePrefix) score += 300;
+    if (fullCaseContains) score += 120;
+  }
+
+  // Fuzzy fallback: basename still dominates full path
+  score += fuzzyScore(qLower, baseLower) * 10;
+  score += fuzzyScore(qLower, fullLower) * (queryHasSlash ? 4 : 1);
+
+  return score;
+}
+
+
 function loadFileList() {
   if (fileList.length === 0) {
     sendWithId({ type: "list_files", id: nextId() });
@@ -363,7 +448,7 @@ function updateAutocompleteSuggestions(query) {
   } else {
     const scored = fileList.map(file => ({
       file,
-      score: fuzzyScore(query, file),
+      score: fileMatchScore(query, file),
     }));
     autocompleteState.suggestions = scored
       .filter(item => item.score > 0)
@@ -396,6 +481,7 @@ function renderAutocomplete() {
     const item = document.createElement("div");
     item.className = `file-autocomplete-item ${i === autocompleteState.selectedIdx ? "focused" : ""}`;
     item.textContent = suggestions[i];
+    item.title = suggestions[i];
     item.addEventListener("click", () => selectAutocompleteSuggestion(i));
     item.addEventListener("mouseover", () => {
       document.querySelectorAll(".file-autocomplete-item").forEach(el => el.classList.remove("focused"));
