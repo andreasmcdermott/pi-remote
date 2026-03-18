@@ -74,6 +74,9 @@ let recentModels = [];
 // Currently active model
 let activeModel = null;
 
+// Most recent session stats payload
+let latestSessionStats = null;
+
 // Whether the dropdown is showing all models or just recents
 let modelPanelShowingAll = false;
 
@@ -186,7 +189,6 @@ async function toggleNotifications() {
 }
 
 function notifyAgentFinished() {
-  if (!document.hidden) return;
   if (!notificationsEnabled) return;
   if (!notificationsSupported()) return;
   if (Notification.permission !== "granted") return;
@@ -601,9 +603,27 @@ function handleMessage(msg) {
 
 // ─── Mirrored commands from other clients ────────────────────────────────────
 
+function normalizeMirroredImages(cmd) {
+  // Bridge mirrors raw client commands, so images usually arrive as cmd.images.
+  // Be tolerant of alternate shapes just in case.
+  const direct = Array.isArray(cmd.images) ? cmd.images : [];
+
+  if (direct.length > 0) {
+    return direct.filter(img => img?.type === "image" && img?.data && img?.mimeType);
+  }
+
+  if (Array.isArray(cmd.content)) {
+    return cmd.content.filter(c => c?.type === "image" && c?.data && c?.mimeType);
+  }
+
+  return [];
+}
+
 function handleMirroredCommand(cmd) {
+  const images = normalizeMirroredImages(cmd);
+
   if (cmd.type === "prompt") {
-    appendUserBubble(cmd.message ?? "");
+    appendUserBubble(cmd.message ?? "", images);
   } else if (cmd.type === "steer") {
     appendSystemNote(`[steer] ${cmd.message ?? ""}`);
   } else if (cmd.type === "follow_up") {
@@ -772,6 +792,46 @@ function setSelectedModel(model) {
   activeModel = model;
   modelBtn.textContent = model.name ?? model.id;
   if (modelPanelOpen) renderModelPanel(); // refresh active highlight if open
+  if (latestSessionStats) applyStats(latestSessionStats);
+}
+
+function getModelContextWindowTokens(model) {
+  if (!model || typeof model !== "object") return null;
+
+  const directCandidates = [
+    model.contextWindow,
+    model.context_window,
+    model.maxContextTokens,
+    model.max_context_tokens,
+    model.maxInputTokens,
+    model.max_input_tokens,
+    model.inputTokenLimit,
+    model.input_token_limit,
+  ];
+
+  for (const value of directCandidates) {
+    if (Number.isFinite(value) && value > 0) return Number(value);
+  }
+
+  const nested = [model.limits, model.capabilities, model.metadata];
+  for (const obj of nested) {
+    if (!obj || typeof obj !== "object") continue;
+    const nestedCandidates = [
+      obj.contextWindow,
+      obj.context_window,
+      obj.maxContextTokens,
+      obj.max_context_tokens,
+      obj.maxInputTokens,
+      obj.max_input_tokens,
+      obj.inputTokenLimit,
+      obj.input_token_limit,
+    ];
+    for (const value of nestedCandidates) {
+      if (Number.isFinite(value) && value > 0) return Number(value);
+    }
+  }
+
+  return null;
 }
 
 function openModelPanel() {
@@ -813,13 +873,40 @@ modelBtn.addEventListener("click", (e) => {
 
 document.addEventListener("click", () => closeModelPanel());
 
+function getContextUsedTokens(data) {
+  const candidates = [
+    data?.tokens?.context,
+    data?.tokens?.contextTokens,
+    data?.tokens?.context_tokens,
+    data?.tokens?.prompt,
+    data?.tokens?.input,
+    data?.tokens?.total,
+  ];
+
+  for (const value of candidates) {
+    if (Number.isFinite(value) && value >= 0) return Number(value);
+  }
+
+  return null;
+}
+
 function applyStats(data) {
   if (!data) return;
+  latestSessionStats = data;
+
+  const totalTokens = data.tokens?.total;
+  const contextUsed = getContextUsedTokens(data);
   const cost = data.cost != null ? `$${data.cost.toFixed(4)}` : "";
-  const tokens = data.tokens?.total != null
-    ? `${(data.tokens.total / 1000).toFixed(1)}k tokens`
+  const tokens = Number.isFinite(totalTokens)
+    ? `${(totalTokens / 1000).toFixed(1)}k tokens`
     : "";
-  sessionStats.textContent = [tokens, cost].filter(Boolean).join(" · ");
+
+  const contextWindow = getModelContextWindowTokens(activeModel);
+  const contextPct = (Number.isFinite(contextUsed) && Number.isFinite(contextWindow) && contextWindow > 0)
+    ? `${Math.min(100, Math.round((contextUsed / contextWindow) * 100))}% ctx`
+    : "";
+
+  sessionStats.textContent = [tokens, contextPct, cost].filter(Boolean).join(" · ");
 }
 
 function requestStats() {
