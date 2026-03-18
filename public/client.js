@@ -24,6 +24,7 @@ const sessionStats   = document.getElementById("session-stats");
 const forkBtn        = document.getElementById("fork-btn");
 const exportBtn      = document.getElementById("export-btn");
 const compactBtn     = document.getElementById("compact-btn");
+const notificationsBtn = document.getElementById("notifications-btn");
 const abortBtn       = document.getElementById("abort-btn");
 const overflowBtn    = document.getElementById("overflow-btn");
 const overflowPanel  = document.getElementById("overflow-panel");
@@ -110,6 +111,11 @@ const subagentGroups = new Map(); // parent toolCallId -> child ids[]
 
 const ORIGINAL_TITLE = "pi remote";
 let unreadFinished = false;
+let notificationsEnabled = localStorage.getItem("notifications-enabled") === "true";
+
+// Auto-scroll behavior: only stick to bottom when user is already near bottom
+const AUTO_SCROLL_SAFE_ZONE_PX = 80;
+let stickToBottom = true;
 
 function markFinished() {
   if (!document.hidden) return; // user is watching — no badge needed
@@ -120,6 +126,78 @@ function markFinished() {
 function clearUnread() {
   unreadFinished = false;
   document.title = ORIGINAL_TITLE;
+}
+
+function notificationsSupported() {
+  return typeof Notification !== "undefined";
+}
+
+const NOTIFICATION_ICON_ON = '<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,71.1a8,8,0,0,1-10.78-3.42,94.13,94.13,0,0,0-33.46-36.91,8,8,0,1,1,8.54-13.54,111.46,111.46,0,0,1,39.12,43.09A8,8,0,0,1,224,71.1ZM35.71,72a8,8,0,0,0,7.1-4.32A94.13,94.13,0,0,1,76.27,30.77a8,8,0,1,0-8.54-13.54A111.46,111.46,0,0,0,28.61,60.32,8,8,0,0,0,35.71,72Zm186.1,103.94A16,16,0,0,1,208,200H167.2a40,40,0,0,1-78.4,0H48a16,16,0,0,1-13.79-24.06C43.22,160.39,48,138.28,48,112a80,80,0,0,1,160,0C208,138.27,212.78,160.38,221.81,175.94ZM150.62,200H105.38a24,24,0,0,0,45.24,0ZM208,184c-10.64-18.27-16-42.49-16-72a64,64,0,0,0-128,0c0,29.52-5.38,53.74-16,72Z"/></svg>';
+const NOTIFICATION_ICON_OFF = '<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M53.92,34.62A8,8,0,1,0,42.08,45.38L58.82,63.8A79.59,79.59,0,0,0,48,104c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.8a40,40,0,0,0,78.4,0h15.44l19.44,21.38a8,8,0,1,0,11.84-10.76ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a63.65,63.65,0,0,1,6.26-27.62L168.09,184Zm166-4.73a8.13,8.13,0,0,1-2.93.55,8,8,0,0,1-7.44-5.08C196.35,156.19,192,129.75,192,104A64,64,0,0,0,96.43,48.31a8,8,0,0,1-7.9-13.91A80,80,0,0,1,208,104c0,35.35,8.05,58.59,10.52,64.88A8,8,0,0,1,214,179.25Z"/></svg>';
+
+function updateNotificationButtons() {
+  const supported = notificationsSupported();
+  const on = supported && notificationsEnabled;
+  const icon = on ? NOTIFICATION_ICON_ON : NOTIFICATION_ICON_OFF;
+
+  if (notificationsBtn) {
+    notificationsBtn.disabled = !supported;
+    notificationsBtn.innerHTML = icon;
+    notificationsBtn.classList.toggle("active", on);
+    notificationsBtn.title = supported
+      ? on
+        ? "Disable done notifications"
+        : "Enable done notifications"
+      : "Notifications unavailable";
+    notificationsBtn.setAttribute("aria-label", notificationsBtn.title);
+  }
+
+  const overflowNotificationsBtn = document.getElementById("overflow-notifications");
+  if (overflowNotificationsBtn) {
+    overflowNotificationsBtn.innerHTML = icon;
+    overflowNotificationsBtn.classList.toggle("active", on);
+    overflowNotificationsBtn.title = supported
+      ? on
+        ? "Disable notifications"
+        : "Enable notifications"
+      : "Notifications unavailable";
+    overflowNotificationsBtn.setAttribute("aria-label", overflowNotificationsBtn.title);
+  }
+}
+
+async function toggleNotifications() {
+  if (!notificationsSupported()) {
+    appendSystemNote("Notifications are not supported in this browser.");
+    return;
+  }
+
+  if (Notification.permission === "default") {
+    const permission = await Notification.requestPermission();
+    notificationsEnabled = permission === "granted";
+  } else if (Notification.permission === "denied") {
+    notificationsEnabled = false;
+    appendSystemNote("Notifications are blocked by the browser. Enable them in site settings.");
+  } else {
+    notificationsEnabled = !notificationsEnabled;
+  }
+
+  localStorage.setItem("notifications-enabled", String(notificationsEnabled));
+  updateNotificationButtons();
+}
+
+function notifyAgentFinished() {
+  if (!document.hidden) return;
+  if (!notificationsEnabled) return;
+  if (!notificationsSupported()) return;
+  if (Notification.permission !== "granted") return;
+
+  try {
+    new Notification("pi remote", {
+      body: "LLM finished working.",
+      tag: "pi-remote-agent-finished",
+      renotify: true,
+    });
+  } catch {}
 }
 
 document.addEventListener("visibilitychange", () => {
@@ -448,6 +526,14 @@ function handleMessage(msg) {
     return;
   }
 
+  // Bridge-side errors (stderr + explicit command failures)
+  if (msg.type === "bridge_error") {
+    const cmdPrefix = msg.command ? ` (${msg.command})` : "";
+    appendErrorBubble(`Bridge${cmdPrefix}: ${msg.message ?? "unknown error"}`);
+    flashStatusError(msg.command ? `${msg.command} failed` : "agent error");
+    return;
+  }
+
   // Agent events
   switch (msg.type) {
     case "agent_start":
@@ -467,6 +553,7 @@ function handleMessage(msg) {
       requestStats();
       if (navigator.vibrate) navigator.vibrate([20, 60, 20]);
       markFinished();
+      notifyAgentFinished();
       break;
 
     case "message_update":
@@ -528,9 +615,10 @@ function handleMirroredCommand(cmd) {
 
 function handleResponse(msg) {
   if (!msg.success) {
-    // Only show errors for user-visible failures (not abort of nothing, etc.)
-    if (msg.error && msg.command !== "abort") {
-      appendErrorBubble(`Error (${msg.command}): ${msg.error}`);
+    // Bridge emits dedicated bridge_error events for failed RPC responses.
+    // Keep response handling quiet here to avoid duplicate error bubbles.
+    if (msg.command !== "abort") {
+      flashStatusError(msg.command ? `${msg.command} failed` : "command failed");
     }
     return;
   }
@@ -1218,9 +1306,15 @@ function populateToolCardOutput(card, text, isError) {
   if (isError) outEl.classList.add("error");
 }
 
-function scrollToBottom() {
+function isNearBottom() {
+  return (conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight) <= AUTO_SCROLL_SAFE_ZONE_PX;
+}
+
+function scrollToBottom(force = false) {
+  if (!force && !stickToBottom) return;
   requestAnimationFrame(() => {
     conversation.scrollTop = conversation.scrollHeight;
+    stickToBottom = true;
   });
 }
 
@@ -1652,6 +1746,18 @@ function setConnectionStatus(state) {
   }
 }
 
+function flashStatusError(text) {
+  statusDot.className = "dot error";
+  statusText.textContent = text;
+  setTimeout(() => {
+    if (!isConnected) {
+      setConnectionStatus("disconnected");
+    } else {
+      setAgentStatus(isStreaming ? "running" : "idle");
+    }
+  }, 4000);
+}
+
 function setAgentStatus(state) {
   if (state === "running") {
     statusDot.className = "dot running";
@@ -1763,6 +1869,8 @@ compactBtn.addEventListener("click", () => {
   appendSystemNote("⟳ Requesting compaction…");
   sendWithId({ type: "compact" });
 });
+
+notificationsBtn?.addEventListener("click", toggleNotifications);
 
 sendBtn.addEventListener("click", sendMessage);
 
@@ -2211,7 +2319,18 @@ document.getElementById("overflow-compact").addEventListener("click", () => {
   compactBtn.click();
 });
 
+document.getElementById("overflow-notifications")?.addEventListener("click", () => {
+  closeOverflow();
+  toggleNotifications();
+});
+
+// Keep track of whether user is near the bottom while scrolling
+conversation.addEventListener("scroll", () => {
+  stickToBottom = isNearBottom();
+});
+
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
+updateNotificationButtons();
 connect();
 msgInput.focus();

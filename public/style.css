@@ -191,7 +191,6 @@ body {
   color: var(--text-dim);
   white-space: nowrap;
   padding: 0 12px;
-  border-right: 1px solid var(--border);
 }
 
 #session-stats {
@@ -215,12 +214,15 @@ body {
   background: none;
   border: 1px solid var(--border);
   color: var(--red);
-  padding: 4px 9px;
   border-radius: 6px;
-  font-size: 12px;
   cursor: pointer;
   flex-shrink: 0;
-  white-space: nowrap;
+}
+
+#abort-btn.icon-only-btn {
+  width: 28px;
+  height: 28px;
+  padding: 4px;
 }
 #abort-btn:disabled { opacity: 0.35; cursor: default; }
 #abort-btn:not(:disabled):active { background: #3a1111; }
@@ -747,11 +749,6 @@ textarea#msg-input:focus { border-color: var(--accent); }
   gap: 3px;
 }
 
-.mode-label {
-  font-size: 13px;
-  margin-right: 2px;
-  color: var(--text-dim);
-}
 
 /* ── Mode cycle button (mobile only) ────────────────────── */
 
@@ -938,14 +935,30 @@ textarea#msg-input:focus { border-color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text-dim);
-  font-size: 18px;
   padding: 0 10px;
   cursor: pointer;
   flex-shrink: 0;
   align-self: stretch;
   display: flex;
   align-items: center;
+  justify-content: center;
   -webkit-tap-highlight-color: transparent;
+}
+
+#attach-btn.icon-only-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+}
+
+#send-btn.icon-only-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 #attach-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
 
@@ -1034,9 +1047,16 @@ textarea#msg-input:focus { border-color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-dim);
-  font-size: 14px;
-  padding: 3px 8px;
   cursor: pointer;
+}
+#session-btn.icon-only-btn {
+  width: 30px;
+  height: 28px;
+  padding: 0;
+}
+#session-btn .action-icon {
+  width: 18px;
+  height: 18px;
 }
 #session-btn:hover { color: var(--text); background: var(--surface2); }
 
@@ -1132,8 +1152,17 @@ textarea#msg-input:focus { border-color: var(--accent); }
 }
 
 .thinking-label {
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
   margin-right: 2px;
+  line-height: 0;
+}
+
+.thinking-label .action-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .thinking-btn,
@@ -1207,7 +1236,7 @@ textarea#msg-input:focus { border-color: var(--accent); }
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  min-width: 160px;
+  min-width: 56px;
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1225,13 +1254,14 @@ textarea#msg-input:focus { border-color: var(--accent); }
   border-bottom: 1px solid var(--border);
   color: var(--text);
   font-size: 14px;
-  padding: 11px 16px;
+  padding: 10px;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
 }
 #overflow-panel button:last-child { border-bottom: none; }
 #overflow-panel button:hover { background: rgba(255,255,255,0.07); }
 #overflow-panel button:active { background: rgba(255,255,255,0.1); }
+#overflow-panel button.active { color: var(--accent); }
 
 /* ── Unified header action button style (desktop) ───────── */
 
@@ -1248,6 +1278,30 @@ textarea#msg-input:focus { border-color: var(--accent); }
 }
 .header-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
 .header-action-btn:active { background: rgba(255,255,255,0.08); }
+.header-action-btn.active { border-color: var(--accent); color: var(--accent); }
+.header-action-btn:disabled { opacity: 0.45; cursor: default; }
+
+.icon-only-btn {
+  padding: 4px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-only-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.action-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
 
 /* ── Mobile: swap to cycle buttons & overflow menu ──────── */
 

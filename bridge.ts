@@ -74,7 +74,7 @@ const pi = Bun.spawn(["pi", "--mode", "rpc"], {
   cwd: CWD,
   stdin: "pipe",
   stdout: "pipe",
-  stderr: "inherit",
+  stderr: "pipe",
   env: { ...process.env },
 });
 
@@ -187,6 +187,17 @@ function sendToWs(ws: any, msg: string): void {
   }
 }
 
+// Forward pi stderr lines to clients as UI-visible bridge_error events
+attachJsonlReader(pi.stderr as ReadableStream<Uint8Array>, (line) => {
+  const msg = JSON.stringify({
+    type: "bridge_error",
+    source: "pi-stderr",
+    message: line,
+  });
+  broadcast(msg);
+  console.error(`[pi:stderr] ${line}`);
+});
+
 attachJsonlReader(pi.stdout as ReadableStream<Uint8Array>, (line) => {
   let parsed: any;
   try {
@@ -211,6 +222,16 @@ attachJsonlReader(pi.stdout as ReadableStream<Uint8Array>, (line) => {
 
   // Route: responses with id → specific client or broadcast; events → broadcast
   if (parsed.type === "response" && parsed.id != null) {
+    // Make command failures very visible in UI
+    if (parsed.success === false && parsed.error) {
+      broadcast(JSON.stringify({
+        type: "bridge_error",
+        source: "rpc-response",
+        command: parsed.command,
+        message: parsed.error,
+      }));
+    }
+
     // When a set_model succeeds, update recents and push updated prefs to all clients
     if (parsed.command === "set_model" && parsed.success && parsed.data) {
       const m = parsed.data;
