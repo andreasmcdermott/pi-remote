@@ -97,23 +97,38 @@ webpush.setVapidDetails(
   pushPrefs.vapidKeys.privateKey,
 );
 
+function entrySubscription(entry: any): any {
+  return entry?.subscription ?? entry;
+}
+
 function sameSubscription(a: any, b: any): boolean {
   return !!a?.endpoint && !!b?.endpoint && a.endpoint === b.endpoint;
 }
 
-function addPushSubscription(sub: any): void {
+function addPushSubscription(sub: any, clientId?: string): void {
   if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) return;
   const list = pushPrefs.subscriptions ?? [];
-  if (!list.some((existing) => sameSubscription(existing, sub))) {
-    list.push(sub);
-    pushPrefs.subscriptions = list;
-    savePushPrefs(pushPrefs);
-  }
+
+  const next = list.filter((entry) => {
+    const existingSub = entrySubscription(entry);
+    if (sameSubscription(existingSub, sub)) return false;
+    if (clientId && entry?.clientId && entry.clientId === clientId) return false;
+    return true;
+  });
+
+  next.push({ clientId: clientId || null, subscription: sub, updatedAt: Date.now() });
+  pushPrefs.subscriptions = next;
+  savePushPrefs(pushPrefs);
 }
 
-function removePushSubscription(sub: any): void {
+function removePushSubscription(sub: any, clientId?: string): void {
   const list = pushPrefs.subscriptions ?? [];
-  const next = list.filter((existing) => !sameSubscription(existing, sub));
+  const next = list.filter((entry) => {
+    const existingSub = entrySubscription(entry);
+    if (sub && sameSubscription(existingSub, sub)) return false;
+    if (clientId && entry?.clientId === clientId) return false;
+    return true;
+  });
   if (next.length !== list.length) {
     pushPrefs.subscriptions = next;
     savePushPrefs(pushPrefs);
@@ -129,8 +144,15 @@ async function notifyPushSubscribers(title: string, body: string): Promise<{ sen
   let failed = 0;
   const results: any[] = [];
 
-  await Promise.all(list.map(async (sub, idx) => {
+  await Promise.all(list.map(async (entry, idx) => {
+    const sub = entrySubscription(entry);
+    const clientId = entry?.clientId ?? undefined;
     const endpoint = String(sub?.endpoint ?? "");
+
+    if (clientId && isClientActive(clientId)) {
+      results.push({ idx, ok: true, skipped: true, reason: "client-active" });
+      return;
+    }
     let host = "unknown";
     try { host = new URL(endpoint).host; } catch {}
 
@@ -152,7 +174,7 @@ async function notifyPushSubscribers(title: string, body: string): Promise<{ sen
         (statusCode === 400 && bodyText.includes("VapidPkHashMismatch")) ||
         (statusCode === 403 && bodyText.includes("BadJwtToken"));
 
-      if (shouldRemove) removePushSubscription(sub);
+      if (shouldRemove) removePushSubscription(sub, entry?.clientId);
 
       results.push({ idx, ok: false, host, statusCode, error: bodyText });
       console.error(`[bridge] web-push send failed idx=${idx} host=${host} status=${statusCode || "?"} error=${bodyText}`);
@@ -188,6 +210,24 @@ pi.exited.then((code) => {
 // ---------------------------------------------------------------------------
 
 const clients = new Set<any>();
+const activeClientConnectionCounts = new Map<string, number>();
+
+function markClientConnected(clientId?: string): void {
+  if (!clientId) return;
+  activeClientConnectionCounts.set(clientId, (activeClientConnectionCounts.get(clientId) ?? 0) + 1);
+}
+
+function markClientDisconnected(clientId?: string): void {
+  if (!clientId) return;
+  const next = (activeClientConnectionCounts.get(clientId) ?? 0) - 1;
+  if (next <= 0) activeClientConnectionCounts.delete(clientId);
+  else activeClientConnectionCounts.set(clientId, next);
+}
+
+function isClientActive(clientId?: string): boolean {
+  if (!clientId) return false;
+  return (activeClientConnectionCounts.get(clientId) ?? 0) > 0;
+}
 
 // Pending response routes: requestId -> ws  (null = broadcast to all)
 const pendingResponseRoutes = new Map<string, any | null>();
@@ -621,7 +661,8 @@ const server = Bun.serve({
     const url = new URL(req.url);
 
     if (req.headers.get("upgrade") === "websocket") {
-      const ok = server.upgrade(req);
+      const clientId = url.searchParams.get("clientId") ?? undefined;
+      const ok = server.upgrade(req, { data: { clientId } });
       if (!ok) return new Response("WebSocket upgrade failed", { status: 400 });
       return undefined as any;
     }
@@ -632,14 +673,14 @@ const server = Bun.serve({
 
     if (url.pathname === "/api/push/subscribe" && req.method === "POST") {
       return req.json().then((body: any) => {
-        addPushSubscription(body?.subscription);
+        addPushSubscription(body?.subscription, body?.clientId);
         return Response.json({ ok: true, count: pushPrefs.subscriptions?.length ?? 0 });
       }).catch(() => new Response("Invalid JSON", { status: 400 }));
     }
 
     if (url.pathname === "/api/push/unsubscribe" && req.method === "POST") {
       return req.json().then((body: any) => {
-        removePushSubscription(body?.subscription);
+        removePushSubscription(body?.subscription, body?.clientId);
         return Response.json({ ok: true, count: pushPrefs.subscriptions?.length ?? 0 });
       }).catch(() => new Response("Invalid JSON", { status: 400 }));
     }
@@ -668,16 +709,20 @@ const server = Bun.serve({
   websocket: {
     open(ws) {
       clients.add(ws);
-      console.log(`[bridge] Client connected (total=${clients.size})`);
+      const clientId = (ws as any).data?.clientId as string | undefined;
+      markClientConnected(clientId);
+      console.log(`[bridge] Client connected (total=${clients.size}${clientId ? `, clientId=${clientId}` : ""})`);
       bootstrapClient(ws);
     },
     close(ws) {
       clients.delete(ws);
+      const clientId = (ws as any).data?.clientId as string | undefined;
+      markClientDisconnected(clientId);
       // Remove any pending routes for this ws to avoid leaks
       for (const [id, target] of pendingResponseRoutes) {
         if (target === ws) pendingResponseRoutes.delete(id);
       }
-      console.log(`[bridge] Client disconnected (total=${clients.size})`);
+      console.log(`[bridge] Client disconnected (total=${clients.size}${clientId ? `, clientId=${clientId}` : ""})`);
     },
     message(ws, msg) {
       handleClientMessage(ws, typeof msg === "string" ? msg : msg.toString());

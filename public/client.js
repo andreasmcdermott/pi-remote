@@ -135,6 +135,19 @@ function notificationsSupported() {
   return typeof Notification !== "undefined";
 }
 
+const PUSH_CLIENT_ID_KEY = "push-client-id";
+
+function getPushClientId() {
+  let id = localStorage.getItem(PUSH_CLIENT_ID_KEY);
+  if (!id) {
+    id = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `push-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(PUSH_CLIENT_ID_KEY, id);
+  }
+  return id;
+}
+
 function pushSupported() {
   return (
     typeof window !== "undefined" &&
@@ -192,7 +205,7 @@ async function subscribeWebPush() {
   await fetch("/api/push/subscribe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ subscription }),
+    body: JSON.stringify({ subscription, clientId: getPushClientId() }),
   });
 }
 
@@ -204,7 +217,7 @@ async function unsubscribeWebPush() {
   await fetch("/api/push/unsubscribe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ subscription }),
+    body: JSON.stringify({ subscription, clientId: getPushClientId() }),
   }).catch(() => {});
 
   try { await subscription.unsubscribe(); } catch {}
@@ -274,10 +287,16 @@ async function toggleNotifications() {
   updateNotificationButtons();
 }
 
+function shouldSuppressInPageNotification() {
+  // If this tab is visible and focused, don't show a duplicate OS notification.
+  return document.visibilityState === "visible" && document.hasFocus();
+}
+
 function notifyAgentFinished() {
   if (!notificationsEnabled) return;
   if (!notificationsSupported()) return;
   if (Notification.permission !== "granted") return;
+  if (shouldSuppressInPageNotification()) return;
 
   try {
     new Notification("pi remote", {
@@ -525,7 +544,8 @@ function nextId() { return `client-${++reqCounter}`; }
 
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}`);
+  const clientId = encodeURIComponent(getPushClientId());
+  ws = new WebSocket(`${proto}://${location.host}?clientId=${clientId}`);
 
   ws.addEventListener("open", () => {
     isConnected = true;
