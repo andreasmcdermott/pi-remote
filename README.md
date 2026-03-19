@@ -1,203 +1,172 @@
 # pi-remote
 
-A mobile remote for the [pi coding agent](https://shittycodingagent.ai).  
-Kick off a task on your laptop, walk away, and monitor + steer it from Safari on your iPhone.
+A mobile-first remote for the [pi coding agent](https://shittycodingagent.ai).
+Run `pi --mode rpc` on your laptop via a Bun bridge, then monitor and control the session from Safari (or any browser) over Tailscale.
 
 ```
-iPhone (Safari) ──── WebSocket ──── bridge.ts (Bun) ──── pi --mode rpc ──── agent
-                   (Tailscale VPN)
+Phone / Browser ── WebSocket ── bridge.ts (Bun) ── pi --mode rpc ── agent
+                     (Tailscale)
 ```
 
-## How it works
+## What it does
 
-`bridge.ts` spawns `pi --mode rpc` as a child process and communicates with it over
-JSONL stdin/stdout using pi's RPC protocol. It serves the web UI over HTTP and
-multiplexes the pi RPC stream across all connected WebSocket clients.
+`bridge.ts` is a thin RPC multiplexer:
 
-- **pi events** (no `id` field) are broadcast to every connected client.
-- **RPC responses** (with `id`) are routed back to the client that made the request.
-- **Extension UI dialogs** (`extension_ui_request`) are broadcast; the first client
-  to respond wins and the answer is forwarded to pi.
+- Spawns `pi --mode rpc` as a child process
+- Forwards JSONL RPC commands from WebSocket clients to pi
+- Broadcasts pi events to all connected clients
+- Routes RPC responses back to the requesting client (or broadcasts when needed)
+- Serves the static web UI from `public/`
 
-When you connect (or reconnect) the bridge bootstraps your client by fetching
-`get_state`, `get_messages`, `get_commands`, and `get_available_models` from pi so
-your UI is always up to date.
+On client connect, the bridge bootstraps UI state with:
 
-Model and thinking-level preferences are persisted to `prefs.json` and restored
-automatically each time pi starts.
+- `get_state`
+- `get_messages`
+- `get_commands`
+- `get_available_models`
+
+It also sends bridge-side metadata:
+
+- persisted model recents (`prefs` message)
+- repo context (`session_info`: folder + git branch)
+
+## Key features
+
+- Live streaming assistant output (`message_update`)
+- Markdown rendering for completed assistant text
+- Tool execution cards (start/update/end)
+- Collapsible thinking blocks
+- Slash command picker (`/`) backed by `get_commands`
+- Send modes: Prompt, Steer, Follow-up
+- Abort current run
+- File reference autocomplete with `@...` (`list_files` bridge command)
+- Session management (`list_sessions`, `switch_session`, `new_session`)
+- Conversation forking (`get_fork_messages`, `fork`)
+- Export conversation (HTML)
+- Manual compact (`compact`)
+- Model picker + recent models persistence
+- Thinking level controls (`set_thinking_level`) persisted across restarts
+- Extension UI request/response round-trips
+- Optional terminal input passthrough (`prompt`, `follow_up`, `abort`)
+- PWA install support (manifest + service worker)
+- Optional Web Push notifications on `agent_end`
+- Mobile polish: safe areas, haptics, unread/finish indicator, copy buttons on code blocks
+- Image attachment support from the UI
+
+## Requirements
+
+- [Bun](https://bun.sh)
+- `pi` CLI installed (`@mariozechner/pi-coding-agent`)
+- [Tailscale](https://tailscale.com) on host + phone for remote access
 
 ## Quick start
 
-### 1. Install Tailscale
-
-Install [Tailscale](https://tailscale.com/download) on both your laptop and iPhone.  
-Note your laptop's Tailscale IP from the menu-bar icon (e.g. `100.x.y.z`).
-
-### 2. Install dependencies
+### 1) Install deps
 
 ```bash
 cd ~/repos/pi-remote
 bun install
 ```
 
-### 3. Run the bridge
+### 2) Run bridge
 
 ```bash
-# Run the agent in the current directory
+# run in current dir
 bun run bridge.ts
 
-# Or point it at a specific project
+# or target another repo for the agent working directory
 AGENT_CWD=~/repos/monorepo bun run bridge.ts
 
-# Custom port (default: 7700)
+# custom port (default: 7700)
 PORT=8080 bun run bridge.ts
 ```
 
-The bridge will:
-- Spawn `pi --mode rpc` with its working directory set to `AGENT_CWD`
-- Print pi events to the terminal as they arrive
-- Serve the phone UI at `http://0.0.0.0:<PORT>`
-- Exit automatically when the pi process exits
+### 3) Open UI
 
-### 4. Open on your phone
-
-```
+```text
 http://<tailscale-ip>:7700
 ```
 
-## Terminal usage
+## Terminal controls
 
-You can type messages directly in the terminal — no need to open the web UI when you're at your laptop.
+While bridge is running, you can send commands from terminal:
 
-| Input | Behaviour |
-|-------|-----------|
-| `some text` + Enter | Prompt with steer behaviour (works whether agent is idle or running) |
-| `> some text` + Enter | Follow-up — sent as `follow_up`, queued until the agent finishes |
-| `abort` + Enter | Abort the current operation |
+| Input | Behavior |
+|---|---|
+| `some text` + Enter | `prompt` with `streamingBehavior: "steer"` |
+| `> some text` + Enter | `follow_up` |
+| `abort` + Enter | `abort` |
 
-## Phone UI features
+## Bridge protocol notes
 
-| Feature | Notes |
-|---------|-------|
-| Live streaming text | Streamed via `message_update` events from pi |
-| Markdown rendering | Full support: headings, lists, code blocks, tables, blockquotes |
-| Tool activity | Shows current tool name + latest output |
-| Send modes | **Prompt**, **Steer**, **Follow-up** |
-| Abort button | Stops the current operation |
-| Conversation history | Bootstrapped from pi on connect / reconnect |
-| Auto-reconnect | Exponential back-off — survives brief network blips |
-| **File reference autocomplete** | Type `@` to fuzzy-search & autocomplete project files (like TUI) |
-| Extension UI dialogs | `extension_ui_request` round-trips: first client to respond wins; auto-deny on timeout |
-| Model picker | Lists available models; recently-used models are persisted in `prefs.json` |
-| Thinking level | Persisted across restarts |
-| PWA / installable | Includes `manifest.json` and service worker for home-screen install |
-| iOS Safari polish | No auto-zoom on input focus; safe-area padding for notch/home bar |
+The WebSocket payloads are pi RPC objects plus a few bridge-only message types.
 
-## WebSocket protocol
-
-The bridge speaks the **pi RPC protocol** over WebSocket — messages are the same JSONL
-objects that pi emits and accepts, forwarded with minimal translation.
-
-### Bridge-only messages (not part of pi RPC)
+### Bridge-only WS messages
 
 #### Server → client
 
-```jsonc
-// Sent immediately on connect with persisted recent-model history
+```json
 { "type": "prefs", "recentModels": [{ "id": "...", "name": "...", "provider": "..." }] }
+{ "type": "session_info", "folder": "repo-name", "branch": "main" }
 ```
 
 #### Client → server
 
-```jsonc
-// List session files for the current AGENT_CWD (handled bridge-side, not forwarded to pi)
-{ "type": "list_sessions", "id": "some-id" }
-// Response:
-{ "type": "response", "command": "list_sessions", "success": true, "id": "some-id",
-  "data": { "sessions": [{ "path": "...", "name": "first user message…", "mtime": 1234567890 }] } }
+```json
+{ "type": "list_files", "id": "...", "forceRefresh": false }
+{ "type": "list_sessions", "id": "..." }
 ```
 
-### Selected pi RPC events (server → client, broadcast)
+#### Bridge responses
 
-```jsonc
-{ "type": "message_update", "assistantMessageEvent": { "type": "text_delta", "delta": "Hello " } }
-{ "type": "tool_execution_start", ... }
-{ "type": "tool_execution_update", ... }
-{ "type": "tool_execution_end", ... }
-{ "type": "agent_start" }
-{ "type": "agent_end" }
-{ "type": "extension_ui_request", "id": "uuid", ... }
+```json
+{ "type": "response", "command": "list_files", "success": true, "id": "...", "data": { "files": ["README.md"] } }
+{ "type": "response", "command": "list_sessions", "success": true, "id": "...", "data": { "sessions": [{ "path": "...", "name": "...", "mtime": 0 }] } }
 ```
 
-### Selected pi RPC commands (client → server, forwarded to pi)
+### Push notification HTTP endpoints
 
-```jsonc
-{ "type": "prompt",              "id": "...", "message": "Refactor the auth hook", "streamingBehavior": "steer" }
-{ "type": "steer",               "id": "...", "message": "Focus on the tests first" }
-{ "type": "follow_up",           "id": "...", "message": "After that, run yarn type-check" }
-{ "type": "abort",               "id": "..." }
-{ "type": "set_model",           "id": "...", "provider": "anthropic", "modelId": "claude-opus-4-5" }
-{ "type": "set_thinking_level",  "id": "...", "level": "medium" }
-{ "type": "get_state",           "id": "..." }
-{ "type": "get_messages",        "id": "..." }
-{ "type": "get_commands",        "id": "..." }
-{ "type": "get_available_models","id": "..." }
-{ "type": "extension_ui_response", "id": "uuid", ... }
-```
-
-See the pi RPC documentation for the full protocol reference.
+- `GET /api/push/public-key`
+- `POST /api/push/subscribe`
+- `POST /api/push/unsubscribe`
+- `POST /api/push/test`
+- `GET /api/push/status`
 
 ## File structure
 
-```
+```text
 pi-remote/
-├── bridge.ts                        # Bun server: spawns pi --mode rpc, WebSocket bridge, file listing
-├── prefs.json                       # Persisted model + thinking-level preferences (auto-created)
+├── bridge.ts
 ├── public/
-│   ├── index.html                   # Phone UI shell
-│   ├── style.css                    # Dark mobile-first styles + markdown + autocomplete styles
-│   ├── client.js                    # WebSocket client, event rendering, autocomplete logic
-│   ├── manifest.json                # PWA manifest for home-screen install
-│   ├── sw.js                        # Service worker
-│   └── icon.svg                     # App icon
+│   ├── index.html
+│   ├── style.css
+│   ├── client.js
+│   ├── manifest.json
+│   ├── sw.js
+│   ├── icon.svg
+│   └── icons/
+│       ├── bell-ringing.svg
+│       └── bell-slash.svg
+├── prefs.json
+├── push-prefs.json
 ├── package.json
-├── PROJECT_PLAN.md                  # Architecture notes and roadmap
-├── AUTOCOMPLETE.md                  # File reference autocomplete feature guide
-├── IMPLEMENTATION_SUMMARY.md        # Technical implementation details
-├── AUTOCOMPLETE_QUICK_REF.md        # Quick reference for developers
-└── README.md
+├── README.md
+├── AUTOCOMPLETE.md
+├── AUTOCOMPLETE_QUICK_REF.md
+├── TROUBLESHOOTING.md
+├── IMPLEMENTATION_SUMMARY.md
+├── PROJECT_PLAN.md
+└── TODO.md
 ```
 
-## Dependencies
+## Notes
 
-| Package | Purpose |
-|---------|---------|
-| `pi` CLI (`@mariozechner/pi-coding-agent`) | Spawned as `pi --mode rpc`; bridge communicates via JSONL stdin/stdout |
-| [marked](https://marked.js.org/) (CDN) | Markdown rendering in the phone UI |
-| [Tailscale](https://tailscale.com) | Secure tunnel from phone to laptop |
-
-## File reference autocomplete
-
-Type `@` in the message input to fuzzy-search project files:
-
-```
-Type:   "Fix the bug in @src"
-Shows:  src/main.ts, src/index.ts, src/utils/...
-Select: @src/main.ts (with ↑↓ arrow keys or mouse)
-```
-
-Features:
-- **Fuzzy matching** - Type partial paths, matches expand (e.g., `@s/m` → `src/main.ts`)
-- **Smart ignore** - Excludes `node_modules`, `.git`, `dist`, build directories
-- **Keyboard navigation** - ↑↓ to select, Enter/Tab to insert, Escape to dismiss
-- **Cached** - 5-second TTL prevents excessive filesystem scans
-- **Mobile-friendly** - Popup positioned above input, touch-optimized
-
-See [AUTOCOMPLETE.md](AUTOCOMPLETE.md) for full documentation and [AUTOCOMPLETE_QUICK_REF.md](AUTOCOMPLETE_QUICK_REF.md) for developer reference.
+- Preferences are persisted locally in `prefs.json` and `push-prefs.json`.
+- The bridge exits when the child pi process exits.
+- On `agent_end`, web push notifications are sent to subscribed clients that are not currently active.
 
 ## References
 
-- Pi RPC docs: `~/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/docs/sdk.md`
+- Pi SDK docs: `~/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/docs/sdk.md`
+- Pi RPC docs: `~/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/docs/rpc.md`
 - Tailscale: https://tailscale.com
-- File autocomplete guide: [AUTOCOMPLETE.md](AUTOCOMPLETE.md)
-- Implementation details: [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)

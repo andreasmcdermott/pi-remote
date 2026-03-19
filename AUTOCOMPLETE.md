@@ -1,106 +1,83 @@
 # File Reference Autocomplete
 
-The web UI now supports file reference autocomplete just like the TUI — type `@` in the message input to fuzzy-search and autocomplete project files.
+The web UI supports file reference autocomplete in the message input.
+Type `@` and then part of a file/path to search project files.
 
-## Features
+## User behavior
 
-- **Fuzzy matching**: Type `@src/t` to match `src/temp.ts`, `src/temp/*.*`, `src/utils/temp.ts`, etc.
-- **Keyboard navigation**: Use ↑↓ arrow keys to navigate suggestions, Enter or Tab to select, Escape to cancel
-- **Cached file list**: Files are cached for 5 seconds to avoid excessive filesystem scans
-- **Smart ignore list**: Automatically excludes `node_modules`, `.git`, `dist`, `build`, and other common directories
-- **Mobile-friendly**: Popup appears above the input on all screen sizes
+1. Type `@` in the message box
+2. Keep typing a filename or path fragment
+3. Pick a suggestion via:
+   - arrow keys + Enter/Tab
+   - mouse/tap
+4. The selected value is inserted into the message, followed by a space
 
-## How to use
+Examples:
 
-1. Type `@` anywhere in your message
-2. Start typing the filename or path you want to reference (e.g., `README`, `src/main`, `package.json`)
-3. The autocomplete popup will show matching files with fuzzy scoring
-4. Select with ↑↓ arrow keys or mouse, then press Enter/Tab or click to insert
-5. The file reference will be inserted as `@filename.ext`
+- `@read` → `README.md`
+- `@src/cli` → `src/cli.ts`
+- `@package` → `package.json`
 
-## Examples
+## Matching behavior
 
-| Typed | Matches |
-|-------|---------|
-| `@read` | `README.md`, `src/reader.ts`, etc. |
-| `@src/t` | `src/temp.ts`, `src/temp/file.txt`, `src/test.ts`, etc. |
-| `@pkg` | `package.json`, `package-lock.json` |
-| `@.env` | `.env`, `.env.example`, `.env.local` |
+Ranking is filename-first and fuzzy-friendly:
 
-## Implementation Details
+- exact/prefix matches score highest
+- basename matches are prioritized over full-path matches
+- slash-containing queries (`@src/...`) increase full-path relevance
+- case-sensitive matches are rewarded when query includes uppercase
 
-### Bridge Side (bridge.ts)
+## Bridge implementation (`bridge.ts`)
 
-- `getFileList()` - Recursively scans the working directory (CWD) for files, excluding common ignored directories
-- `listFilesRecursive()` - DFS traversal with built-in ignore patterns
-- File list cache with 5-second TTL to balance freshness vs. performance
-- `list_files` RPC handler - Responds to client requests with the current file list
+Autocomplete uses a bridge-side file scan endpoint:
 
-### Client Side (public/client.js)
+- command: `list_files`
+- response: `response` with `command: "list_files"` and `data.files`
 
-- Input listener detects `@` characters and extracts the query string
-- `fuzzyScore()` - Sublime Text-style fuzzy scoring algorithm with:
-  - Consecutive character bonus
-  - Word boundary bonus (matches after `/`)
-  - Position bonus (prefers early matches)
-- `renderAutocomplete()` - Renders suggestions popup above the input
-- Keyboard navigation: Arrow keys for selection, Enter/Tab to select, Escape to cancel
-- Auto-dismisses when user types whitespace or invalid characters
+Bridge file list details:
 
-### Styling (public/style.css)
+- recursive directory walk from `AGENT_CWD`
+- short cache TTL (`FILE_LIST_CACHE_TTL = 5000` ms)
+- ignores common heavy/build dirs (`node_modules`, `.git`, `dist`, etc.)
+- includes directories with trailing `/` for path completion
+- excludes dotfiles from suggestions
 
-- `#file-autocomplete` - Popup container (fixed positioning, max 200px height)
-- `.file-autocomplete-item` - Individual suggestion item
-- `.file-autocomplete-item.focused` - Keyboard/hover highlight
-- Integrated with existing dark theme using CSS variables
+## Client implementation (`public/client.js`)
 
-## Performance
+- detects active `@query` near cursor
+- requests files once (then reuses cache)
+- computes relevance score client-side
+- renders top 15 suggestions
+- supports keyboard/mouse navigation and dismissal
 
-- **Lazy loading**: File list is only fetched on first `@` keypress
-- **Smart caching**: 5-second cache prevents excessive filesystem scans
-- **Limited results**: Only top 15 matches shown (computed in real-time)
-- **Efficient fuzzy**: Scores computed on client side (browser) after file list loaded
+## Styling (`public/style.css`)
 
-## Ignored Directories
+Autocomplete popup:
 
-The bridge automatically excludes these directories from the file list:
+- element: `#file-autocomplete`
+- item class: `.file-autocomplete-item`
+- selected item class: `.focused`
 
-- `node_modules`, `.git`, `.next`, `dist`, `build`
-- `.venv`, `__pycache__`, `.vscode`, `.idea`
-- `.DS_Store`, `target`, `coverage`, `out`, `.turbo`
+The popup is positioned above the input and optimized for touch devices.
 
-Add more to the `IGNORED_DIRS` Set in bridge.ts if needed.
+## Tuning knobs
 
-## Customization
+- cache TTL: `FILE_LIST_CACHE_TTL` in `bridge.ts`
+- ignored directories/files: `IGNORED_DIRS`, `IGNORED_FILES` in `bridge.ts`
+- max suggestions: `.slice(0, 15)` in `updateAutocompleteSuggestions()`
 
-### Adjust cache TTL
+## Debugging
 
-Edit `bridge.ts`:
+Browser console:
 
-```typescript
-const FILE_LIST_CACHE_TTL = 5000; // milliseconds
+```js
+fileList
+autocompleteState
+sendWithId({ type: "list_files", forceRefresh: true })
 ```
 
-### Adjust max suggestions shown
+If suggestions are missing:
 
-Edit `client.js`:
-
-```javascript
-autocompleteState.suggestions = scored
-  .filter(item => item.score > 0)
-  .sort((a, b) => b.score - a.score)
-  .slice(0, 15) // Change 15 to desired count
-  .map(item => item.file);
-```
-
-### Adjust ignored directories
-
-Edit `bridge.ts`:
-
-```typescript
-const IGNORED_DIRS = new Set([
-  "node_modules",
-  ".git",
-  // Add more here
-]);
-```
+- verify bridge is running in expected `AGENT_CWD`
+- check ignored directory rules
+- confirm files are not dotfiles

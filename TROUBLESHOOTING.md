@@ -1,108 +1,79 @@
 # Troubleshooting
 
-## UI looks messed up / doesn't load
+## 1) UI doesn’t load or looks stale
 
-### Step 1: Clear cache
-```bash
-# In Safari: Develop → Empty Web Storage
-# In Chrome: DevTools → Application → Storage → Clear Site Data
-```
+- Hard refresh the page
+- Clear site data/cache for the bridge origin
+- Confirm bridge is running and reachable (`http://<host>:<port>`)
 
-Then force reload:
-- **Mac Safari**: Cmd+Shift+R
-- **Chrome**: Ctrl+Shift+F5
+Bridge startup should show lines like:
 
-### Step 2: Check browser console
-1. Press F12 or Cmd+Option+I (Mac)
-2. Go to "Console" tab
-3. Look for red errors
-4. Share the error messages
-
-### Step 3: Check bridge logs
-Run the bridge and look for errors:
-```bash
-$ bun run bridge.ts
+```text
+[bridge] Web Push ready (...)
+[bridge] Spawning pi --mode rpc, cwd=...
 [bridge] Listening on http://0.0.0.0:7700
-[bridge] Client connected (total=1)
 ```
 
-If you see error messages, share them.
+## 2) WebSocket won’t connect
 
-### Step 4: Test basic functionality
-Try without autocomplete:
-1. Type a simple message (no `@`)
-2. Click Send
-3. Does it work?
+- Check Tailscale connectivity between phone and laptop
+- Verify port (`PORT`, default `7700`)
+- Confirm no firewall rule is blocking the port
+- Watch bridge logs for connect/disconnect lines
 
-If yes, the UI itself is fine, issue is just autocomplete.
+## 3) Messages send but no agent response
 
-### Step 5: Check what "messed up" means
-- UI doesn't load at all?
-- Elements are misaligned/overlapping?
-- Text colors are wrong?
-- Input area missing?
-- Buttons don't work?
+- Inspect bridge logs for `bridge_error` or pi stderr output
+- Ensure `pi` is installed and runnable on host
+- Check model/provider credentials in your pi setup
 
-## Common Issues
+## 4) Autocomplete issues (`@...`)
 
-### Issue: Autocomplete popup covers input
-**Solution**: Adjust positioning in `client.js`:
-```javascript
-// In renderAutocomplete()
-autocompleteEl.style.bottom = (window.innerHeight - inputRect.top + 4) + "px"; // ← Change 4
-```
+If files do not appear:
 
-### Issue: File list not loading
-**Solution**: Check bridge can access your project files:
-```bash
-$ ls -la ~/repos/pi-remote/  # Should show files
-```
+- Ensure bridge `AGENT_CWD` points at expected project
+- Force refresh file list in console:
 
-### Issue: Keyboard navigation doesn't work
-**Solution**: Make sure input has focus:
-- Click in the message input first
-- Then type `@` and use arrow keys
-
-### Issue: "Cannot read property of null" errors
-**Solution**: Added in latest version - clear cache and reload
-
-### Issue: Fuzzy matching isn't working
-**Solution**: 
-- Try exact filename: `@README.md`
-- Check file actually exists: `find . -name "*your-file*"`
-- Check it's not in ignored directories (node_modules, .git, etc.)
-
-## Debug Tips
-
-### In browser console:
-```javascript
-// View cached files
-fileList
-
-// View autocomplete state
-autocompleteState
-
-// Force file list refresh
+```js
 sendWithId({ type: "list_files", forceRefresh: true })
-
-// View RPC responses
-// Filter console to show "list_files"
 ```
 
-### In bridge terminal:
-```bash
-# Add logging to bridge.ts to see file scans
-# Around line 340, add:
-console.log("[list_files]", files.slice(0, 5));
-```
+- Check ignore lists in `bridge.ts` (`IGNORED_DIRS`, `IGNORED_FILES`)
 
-## Getting Help
+If ranking feels wrong:
 
-When reporting issues, please include:
-1. **What you see** (screenshot or description)
-2. **Browser console errors** (exact messages)
-3. **Bridge terminal output** (first 20 lines when you start it)
-4. **Steps to reproduce** (what did you do?)
-5. **Your project type** (Node.js, TypeScript, Python, etc.)
+- Review scoring logic in `fileMatchScore()` (`public/client.js`)
 
-This helps diagnose the issue quickly!
+## 5) Session list/switch issues
+
+- Session listing uses bridge-side filesystem scan of `~/.pi/agent/sessions/...`
+- Confirm sessions exist for the current `AGENT_CWD`
+- Confirm process has permission to read that directory
+
+## 6) Push notifications not working
+
+Requirements:
+
+- Browser supports Notifications + Service Worker + PushManager
+- Notification permission is granted
+- Client subscribed successfully (`/api/push/subscribe`)
+
+Checks:
+
+- `GET /api/push/status` should show subscription count > 0
+- Use `POST /api/push/test` to test delivery
+- Verify tab/client activity rules: active clients are skipped on done-notify
+
+## 7) Extension dialog stuck
+
+- `extension_ui_request` is broadcast to all clients
+- first matching `extension_ui_response` wins
+- if no response, pi resolves per its own timeout behavior
+
+## Useful debugging info to share
+
+- Browser console errors
+- First ~50 lines of bridge logs after startup
+- Exact reproduction steps
+- Device/browser details
+- Whether issue reproduces with a desktop browser on same network

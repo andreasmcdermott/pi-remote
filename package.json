@@ -1,7 +1,7 @@
 {
   "name": "pi-remote",
   "version": "0.1.0",
-  "description": "Mobile remote for the pi coding agent",
+  "description": "Mobile-first RPC bridge remote for the pi coding agent",
   "type": "module",
   "scripts": {
     "start": "bun run bridge.ts",
