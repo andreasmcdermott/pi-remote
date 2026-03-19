@@ -229,53 +229,6 @@ body {
 
 /* ── Conversation ────────────────────────────────────── */
 
-#subagent-monitor {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 6px 12px;
-}
-
-#subagent-monitor-toggle {
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  border-radius: 8px;
-  padding: 6px 9px;
-  font-size: 12px;
-}
-
-#subagent-monitor-body {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 170px;
-  overflow-y: auto;
-}
-
-.subagent-row {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 8px;
-  background: #141414;
-}
-
-.subagent-main {
-  font-size: 12px;
-}
-
-.subagent-task,
-.subagent-output {
-  font-size: 11px;
-  color: var(--text-dim);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 #conversation {
   flex: 1;
   overflow-y: auto;

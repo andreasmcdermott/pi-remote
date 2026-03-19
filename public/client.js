@@ -31,9 +31,6 @@ const overflowPanel  = document.getElementById("overflow-panel");
 const modeCycleBtn   = document.getElementById("mode-cycle");
 const thinkingCycleBtn = document.getElementById("thinking-cycle");
 const conversation   = document.getElementById("conversation");
-const subagentMonitor = document.getElementById("subagent-monitor");
-const subagentMonitorToggle = document.getElementById("subagent-monitor-toggle");
-const subagentMonitorBody = document.getElementById("subagent-monitor-body");
 const cmdPicker      = document.getElementById("cmd-picker");
 const cmdList        = document.getElementById("cmd-list");
 const dialogOverlay  = document.getElementById("dialog-overlay");
@@ -101,14 +98,6 @@ const THINKING_LABELS = { none: "Off", low: "Low", high: "High" };
 
 // Streaming render state
 let streamingTurn = null; // { textEl, thinkingEl, thinkingRaw, textRaw, toolCards: Map<toolCallId, el> }
-
-// Subagent monitor state
-let subagentMonitorMode = localStorage.getItem("subagent-monitor-mode") ?? "expanded"; // expanded | collapsed
-if (subagentMonitorMode !== "expanded" && subagentMonitorMode !== "collapsed") {
-  subagentMonitorMode = "collapsed";
-}
-const subagents = new Map(); // id -> state
-const subagentGroups = new Map(); // parent toolCallId -> child ids[]
 
 // ─── Unread / finish indicator ────────────────────────────────────────────────
 
@@ -755,17 +744,14 @@ function handleMessage(msg) {
       break;
 
     case "tool_execution_start":
-      handleSubagentToolStart(msg);
       handleToolStart(msg);
       break;
 
     case "tool_execution_update":
-      handleSubagentToolUpdate(msg);
       handleToolUpdate(msg);
       break;
 
     case "tool_execution_end":
-      handleSubagentToolEnd(msg);
       handleToolEnd(msg);
       break;
 
@@ -1595,227 +1581,6 @@ function scrollToBottom(force = false) {
     conversation.scrollTop = conversation.scrollHeight;
     stickToBottom = true;
   });
-}
-
-// ─── Subagent monitor ─────────────────────────────────────────────────────────
-
-function shorten(text, max = 90) {
-  if (!text) return "";
-  return text.length > max ? text.slice(0, max - 1) + "…" : text;
-}
-
-function formatElapsedMs(start, end) {
-  const ms = Math.max(0, (end ?? Date.now()) - start);
-  const sec = Math.floor(ms / 1000);
-  const min = Math.floor(sec / 60);
-  return min > 0 ? `${min}m ${sec % 60}s` : `${sec}s`;
-}
-
-function statusIcon(status) {
-  if (status === "running") return "⟳";
-  if (status === "error") return "✗";
-  return "✓";
-}
-
-function extractAgentName(name) {
-  if (!name) return "Agent";
-  if (name.includes("story-orchestrator")) return "Story Orchestrator";
-  if (name.includes("scout-and-plan")) return "Scout & Plan";
-  return name;
-}
-
-function cycleSubagentMode() {
-  const modes = ["expanded", "collapsed"];
-  const idx = modes.indexOf(subagentMonitorMode);
-  subagentMonitorMode = modes[(idx + 1) % modes.length];
-  localStorage.setItem("subagent-monitor-mode", subagentMonitorMode);
-  renderSubagentMonitor();
-}
-
-function renderSubagentMonitor() {
-  if (!subagentMonitor || !subagentMonitorBody || !subagentMonitorToggle) return;
-
-  const items = [...subagents.values()].sort((a, b) => {
-    if (a.status === "running" && b.status !== "running") return -1;
-    if (a.status !== "running" && b.status === "running") return 1;
-    return b.startTime - a.startTime;
-  });
-
-  const running = items.filter(x => x.status === "running").length;
-  const done = items.filter(x => x.status === "complete").length;
-  const err = items.filter(x => x.status === "error").length;
-
-  if (items.length === 0) {
-    subagentMonitor.classList.add("hidden");
-    return;
-  }
-
-  subagentMonitor.classList.remove("hidden");
-  subagentMonitorToggle.textContent = `🔄 Subagents · ${running} running, ${done} done${err ? `, ${err} error` : ""} [${subagentMonitorMode}]`;
-
-  if (subagentMonitorMode === "collapsed") {
-    subagentMonitorBody.classList.add("hidden");
-    return;
-  }
-
-  subagentMonitorBody.classList.remove("hidden");
-  subagentMonitorBody.innerHTML = "";
-
-  items.forEach((a) => {
-    const row = document.createElement("div");
-    row.className = "subagent-row";
-
-    const main = document.createElement("div");
-    main.className = "subagent-main";
-    const parallelTag = a.parallelTotal ? ` [${(a.parallelIndex ?? 0) + 1}/${a.parallelTotal}]` : "";
-    main.textContent = `${statusIcon(a.status)} ${a.name}${parallelTag} (${formatElapsedMs(a.startTime, a.endTime)})`;
-
-    row.appendChild(main);
-
-    if (a.task) {
-      const task = document.createElement("div");
-      task.className = "subagent-task";
-      task.textContent = `Task: ${shorten(a.task, 120)}`;
-      row.appendChild(task);
-    }
-
-    const out = a.output?.length ? a.output[a.output.length - 1] : (a.result ?? "");
-    if (out) {
-      const output = document.createElement("div");
-      output.className = "subagent-output";
-      output.textContent = shorten(out.replace(/\s+/g, " "), 120);
-      row.appendChild(output);
-    }
-
-    subagentMonitorBody.appendChild(row);
-  });
-}
-
-function startSubagentEntry(id, name, task, extra = {}) {
-  subagents.set(id, {
-    id,
-    name: extractAgentName(name),
-    task,
-    status: "running",
-    startTime: Date.now(),
-    endTime: null,
-    output: [],
-    result: "",
-    ...extra,
-  });
-}
-
-function isSubagentToolName(name) {
-  return typeof name === "string" && name.toLowerCase().includes("subagent");
-}
-
-function handleSubagentToolStart(msg) {
-  if (!isSubagentToolName(msg.toolName)) return;
-  const params = (msg.params ?? msg.args ?? {});
-  const groupIds = [];
-  let startedAny = false;
-
-  if (params.agent && params.task) {
-    startSubagentEntry(msg.toolCallId, params.agent, params.task, { parentToolCallId: msg.toolCallId });
-    groupIds.push(msg.toolCallId);
-    startedAny = true;
-  }
-
-  if (Array.isArray(params.tasks)) {
-    params.tasks.forEach((t, i) => {
-      if (!t?.agent || !t?.task) return;
-      const id = `${msg.toolCallId}::${i}`;
-      startSubagentEntry(id, t.agent, t.task, {
-        parentToolCallId: msg.toolCallId,
-        parallelIndex: i,
-        parallelTotal: params.tasks.length,
-      });
-      groupIds.push(id);
-      startedAny = true;
-    });
-  }
-
-  if (Array.isArray(params.chain)) {
-    params.chain.forEach((c, i) => {
-      if (!c?.agent || !c?.task) return;
-      const id = `${msg.toolCallId}::${i}`;
-      startSubagentEntry(id, c.agent, c.task, {
-        parentToolCallId: msg.toolCallId,
-      });
-      groupIds.push(id);
-      startedAny = true;
-    });
-  }
-
-  if (!startedAny) {
-    console.debug("[subagent-monitor] Unparsed subagent start payload", {
-      toolName: msg.toolName,
-      toolCallId: msg.toolCallId,
-      params: msg.params,
-      args: msg.args,
-      raw: msg,
-    });
-    startSubagentEntry(msg.toolCallId, msg.toolName ?? "subagent", "(task unavailable)", { parentToolCallId: msg.toolCallId });
-    groupIds.push(msg.toolCallId);
-  }
-
-  if (groupIds.length > 0) {
-    subagentGroups.set(msg.toolCallId, groupIds);
-    renderSubagentMonitor();
-  }
-}
-
-function handleSubagentToolUpdate(msg) {
-  if (!isSubagentToolName(msg.toolName)) return;
-  const deltaText = msg.delta || extractToolResultText(msg.partialResult?.content ?? []);
-  if (!deltaText) return;
-
-  const direct = subagents.get(msg.toolCallId);
-  if (direct && direct.status === "running") {
-    direct.output.push(deltaText);
-    renderSubagentMonitor();
-    return;
-  }
-
-  const group = subagentGroups.get(msg.toolCallId) ?? [];
-  const running = group.map(id => subagents.get(id)).filter(a => a && a.status === "running");
-  const target = running[0] ?? (group.length ? subagents.get(group[0]) : null);
-  if (target) {
-    target.output.push(deltaText);
-    renderSubagentMonitor();
-  }
-}
-
-function handleSubagentToolEnd(msg) {
-  if (!isSubagentToolName(msg.toolName)) return;
-  let resultText = extractToolResultText(msg.result?.content ?? []);
-
-  const completeOne = (a) => {
-    if (!a) return;
-    a.status = msg.isError ? "error" : "complete";
-    a.endTime = Date.now();
-    if (resultText) a.result = resultText;
-  };
-
-  const direct = subagents.get(msg.toolCallId);
-  if (direct) {
-    completeOne(direct);
-  }
-
-  const group = subagentGroups.get(msg.toolCallId) ?? [];
-  group.forEach((id) => completeOne(subagents.get(id)));
-
-  renderSubagentMonitor();
-}
-
-setInterval(() => {
-  if ([...subagents.values()].some(a => a.status === "running")) {
-    renderSubagentMonitor();
-  }
-}, 1000);
-
-if (subagentMonitorToggle) {
-  subagentMonitorToggle.addEventListener("click", cycleSubagentMode);
 }
 
 // ─── Extension UI protocol ───────────────────────────────────────────────────
